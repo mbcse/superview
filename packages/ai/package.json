@@ -1,0 +1,24 @@
+{
+  "name": "@takeandstake/ai",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.107",
+    "@ai-sdk/openai": "^2.0.131",
+    "@takeandstake/core": "workspace:*",
+    "@takeandstake/db": "workspace:*",
+    "@takeandstake/shared": "workspace:*",
+    "ai": "^5.0.269",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,1173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WalletType {
+  EMBEDDED
+  SMART
+  EXTERNAL
+}
+
+enum TokenStatus {
+  ACTIVE
+  INACTIVE
+  HALTED
+}
+
+enum PriceSource {
+  CHAINLINK
+  RH_REST
+}
+
+enum TakeStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum Visibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+enum RevisionOrigin {
+  AUTHOR
+  AGENT
+}
+
+enum TakeLinkType {
+  FORK
+  COUNTER
+}
+
+enum PocketMode {
+  WATCH
+  DRY_RUN
+  LIVE
+}
+
+enum PocketStatus {
+  ACTIVE
+  PAUSED
+  CLOSED
+}
+
+enum AccountKind {
+  CASH
+  POSITION
+}
+
+enum LedgerTxType {
+  DEPOSIT
+  ALLOCATE
+  FILL
+  FEE
+  WITHDRAW
+  ADJUST
+}
+
+enum MandateMode {
+  AUTO
+  APPROVAL
+}
+
+enum CycleKind {
+  DAILY
+  EVENT
+  WEEKLY_DEEP
+}
+
+enum CycleStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  SKIPPED
+}
+
+enum EvidenceSource {
+  MONITOR
+  FILING
+  EARNINGS
+  ANALYST
+  PRICE
+  CATALOG
+  USER
+}
+
+enum Stance {
+  SUPPORT
+  CONTRADICT
+  NEUTRAL
+}
+
+enum MarketRegime {
+  RISK_ON
+  NEUTRAL
+  RISK_OFF
+}
+
+enum HealthVerdict {
+  HOLD
+  ADD
+  TRIM
+  EXIT
+}
+
+enum AgentLevel {
+  TAKE
+  POCKET
+}
+
+enum OrderMode {
+  DRY_RUN
+  LIVE
+}
+
+enum OrderKind {
+  INVEST
+  REBALANCE
+  EXIT
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SUBMITTING
+  FILLED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum Side {
+  BUY
+  SELL
+}
+
+enum LegStatus {
+  PENDING
+  QUOTED
+  SUBMITTED
+  FILLED
+  FAILED
+  SKIPPED
+}
+
+enum CircleRole {
+  AUTHOR
+  RESEARCHER
+  SKEPTIC
+  ALLOCATOR
+  CURATOR
+}
+
+enum CommentKind {
+  QUESTION
+  EVIDENCE
+  RISK
+  CORRECTION
+  UPDATE
+  AGENT_BRIEF
+  AGENT_TRADE
+}
+
+enum AuthorType {
+  USER
+  AGENT
+  SYSTEM
+}
+
+enum ReactionType {
+  AGREE
+  DISAGREE
+  USEFUL
+}
+
+enum UserStance {
+  BULL
+  BEAR
+  UNSURE
+}
+
+enum RebalanceStatus {
+  PENDING
+  APPROVED
+  AUTO_EXECUTED
+  DISMISSED
+  EXPIRED
+  BLOCKED
+}
+
+enum ResearchStatus {
+  PENDING
+  DECOMPOSING
+  INTERPRETING
+  SCREENING
+  DISCOVERING
+  ENRICHING
+  DILIGENCE
+  SCORING
+  ANALYST
+  PORTFOLIO
+  CRITIC
+  DRAFT
+  DEEP_DONE
+  FAILED
+}
+
+enum JurisdictionStatus {
+  UNKNOWN
+  ALLOWED
+  RESTRICTED
+}
+
+model User {
+  id                      String              @id @default(cuid())
+  privyId                 String              @unique
+  handle                  String              @unique
+  displayName             String
+  avatar                  String?
+  country                 String?
+  jurisdictionStatus      JurisdictionStatus  @default(UNKNOWN)
+  attestedNotRestrictedAt DateTime?
+  liveUnlockedAt          DateTime?
+  createdAt               DateTime            @default(now())
+  wallets                 Wallet[]
+  takes                   Take[]
+  pockets                 Pocket[]
+  backings                Backing[]
+  comments                Comment[]
+  pocketChats             PocketChat[]
+  reactions               CommentReaction[]
+  stances                 TakeStance[]
+  follows                 Follow[]            @relation("Follower")
+  collections             Collection[]
+  notifications           Notification[]
+  circleMemberships       CircleMember[]
+  reports                 Report[]
+  beliefMaps              BeliefMapSnapshot[]
+  reputation              ReputationSnapshot[]
+  auditLogs               AuditLog[]
+}
+
+model Wallet {
+  id              String           @id @default(cuid())
+  userId          String
+  user            User             @relation(fields: [userId], references: [id])
+  address         String
+  type            WalletType       @default(EMBEDDED)
+  chainId         Int              @default(4663)
+  isPrimary       Boolean          @default(true)
+  sanctions       SanctionsCheck[]
+  deposits        Deposit[]
+  withdrawals     Withdrawal[]
+  signerGrants    SignerGrant[]
+  createdAt       DateTime         @default(now())
+
+  @@unique([address, chainId])
+}
+
+model SanctionsCheck {
+  id        String   @id @default(cuid())
+  walletId  String
+  wallet    Wallet   @relation(fields: [walletId], references: [id])
+  address   String
+  provider  String
+  result    String
+  checkedAt DateTime @default(now())
+}
+
+model CatalogSnapshot {
+  id        String        @id @default(cuid())
+  fetchedAt DateTime      @default(now())
+  hash      String
+  rawR2Key  String?
+  tokens    StockToken[]
+  runs      ResearchRun[]
+}
+
+model StockToken {
+  id                   String           @id @default(cuid())
+  snapshotId           String?
+  snapshot             CatalogSnapshot? @relation(fields: [snapshotId], references: [id])
+  symbol               String
+  name                 String
+  contractAddress      String
+  chainId              Int              @default(4663)
+  rhjId                String?
+  isin                 String?
+  feedAddress          String?
+  feedDecimals         Int              @default(8)
+  heartbeat            Int              @default(86400)
+  status               TokenStatus      @default(ACTIVE)
+  currentMultiplier    String           @default("1000000000000000000")
+  pendingMultiplier    String?
+  pendingEffectiveAt   DateTime?
+  tradingCapabilities  Json?
+  isTradingHalt        Boolean          @default(false)
+  logoUrl              String?
+  updatedAt            DateTime         @updatedAt
+  universe             UniverseCompany?
+  prices               PriceSnapshot[]
+  actions              CorporateAction[]
+  holdings             TargetHolding[]
+  candidates           CandidateCompany[]
+
+  @@unique([symbol, chainId])
+  @@index([contractAddress])
+}
+
+model UniverseCompany {
+  id              String     @id @default(cuid())
+  tokenId         String     @unique
+  token           StockToken @relation(fields: [tokenId], references: [id])
+  cik             String?
+  figi            String?
+  isin            String?
+  exchange        String?
+  legalName       String
+  aliases         Json?
+  sector          String?
+  industry        String?
+  marketCap       Decimal?   @db.Decimal(38, 2)
+  beta            Decimal?   @db.Decimal(12, 6)
+  nextEarningsAt  DateTime?
+  businessSummary String     @default("")
+  segments        Json?
+  embedding       Json?
+  profile         Json?
+  tags            Json?
+  refreshedAt     DateTime   @default(now())
+}
+
+model PriceSnapshot {
+  id         String      @id @default(cuid())
+  tokenId    String
+  token      StockToken  @relation(fields: [tokenId], references: [id])
+  source     PriceSource
+  price      Decimal     @db.Decimal(38, 18)
+  bid        Decimal?    @db.Decimal(38, 18)
+  ask        Decimal?    @db.Decimal(38, 18)
+  volumeUsd  Decimal?    @db.Decimal(38, 2)
+  halt       Boolean     @default(false)
+  roundId    String?
+  updatedAt  DateTime
+  observedAt DateTime    @default(now())
+  isDaily    Boolean     @default(false)
+
+  @@index([tokenId, observedAt])
+  @@index([tokenId, source, observedAt])
+}
+
+model CorporateAction {
+  id          String      @id @default(cuid())
+  rhjId       String?
+  tokenId     String
+  token       StockToken  @relation(fields: [tokenId], references: [id])
+  type        String
+  status      String
+  processDate DateTime?
+  details     Json?
+}
+
+model MarketCalendar {
+  id        String   @id @default(cuid())
+  date      DateTime @unique
+  openEt    String?
+  closeEt   String?
+  isHoliday Boolean  @default(false)
+}
+
+model ResearchRun {
+  id                String           @id @default(cuid())
+  takeId            String?
+  take              Take?            @relation(fields: [takeId], references: [id])
+  takeRevisionId    String?
+  status            ResearchStatus   @default(PENDING)
+  stage             String           @default("queued")
+  catalogSnapshotId String?
+  catalog           CatalogSnapshot? @relation(fields: [catalogSnapshotId], references: [id])
+  modelVersions     Json?
+  costUsd           Decimal          @default(0) @db.Decimal(18, 6)
+  startedAt         DateTime         @default(now())
+  finishedAt        DateTime?
+  error             String?
+  thesis            ThesisSpec?
+  actions           EconomicAction[]
+  candidates        CandidateCompany[]
+  coverage          CoverageReport?
+  revisions         TakeRevision[]
+  events            ResearchEvent[]
+}
+
+model ResearchEvent {
+  id        String      @id @default(cuid())
+  runId     String
+  run       ResearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stage     String
+  message   String
+  payload   Json?
+  createdAt DateTime    @default(now())
+
+  @@index([runId, createdAt])
+}
+
+model ThesisSpec {
+  id             String      @id @default(cuid())
+  runId          String      @unique
+  run            ResearchRun @relation(fields: [runId], references: [id])
+  normalizedTake String
+  interpretation String
+  mechanism      String      @default("")
+  horizon        String?
+  assumptions    Json?
+  falsifiers     Json?
+  questions      Json?
+  refuse         Boolean     @default(false)
+  refuseReason   String?
+}
+
+model EconomicAction {
+  id           String              @id @default(cuid())
+  runId        String
+  run          ResearchRun         @relation(fields: [runId], references: [id])
+  parentId     String?
+  parent       EconomicAction?     @relation("ActionTree", fields: [parentId], references: [id])
+  children     EconomicAction[]    @relation("ActionTree")
+  name         String
+  description  String
+  userIncluded Boolean             @default(true)
+  order        Int                 @default(0)
+  candidates   CandidateCompany[]
+}
+
+model CandidateCompany {
+  id               String          @id @default(cuid())
+  runId            String
+  run              ResearchRun     @relation(fields: [runId], references: [id])
+  actionId         String?
+  action           EconomicAction? @relation(fields: [actionId], references: [id])
+  name             String
+  url              String?
+  publicStatus     String?
+  cik              String?
+  resolvedTokenId  String?
+  token            StockToken?     @relation(fields: [resolvedTokenId], references: [id])
+  holdable         Boolean         @default(false)
+  reasonNotHoldable String?
+  provider         String
+  providerRef      String?
+  claims           Claim[]
+  score            ExposureScore?
+}
+
+model Claim {
+  id          String        @id @default(cuid())
+  runId       String
+  candidateId String
+  candidate   CandidateCompany @relation(fields: [candidateId], references: [id])
+  field       String
+  value       Json?
+  stance      Stance        @default(NEUTRAL)
+  confidence  Decimal       @db.Decimal(6, 4)
+  sources     ClaimSource[]
+}
+
+model Source {
+  id          String        @id @default(cuid())
+  url         String
+  title       String?
+  publisher   String?
+  publishedAt DateTime?
+  fetchedAt   DateTime      @default(now())
+  contentHash String?
+  excerpt     String?
+  r2Key       String?
+  claims      ClaimSource[]
+}
+
+model ClaimSource {
+  claimId  String
+  sourceId String
+  claim    Claim  @relation(fields: [claimId], references: [id])
+  source   Source @relation(fields: [sourceId], references: [id])
+
+  @@id([claimId, sourceId])
+}
+
+model ExposureScore {
+  id          String            @id @default(cuid())
+  candidateId String            @unique
+  candidate   CandidateCompany  @relation(fields: [candidateId], references: [id])
+  directness  Decimal           @db.Decimal(6, 4)
+  purityLow   Decimal           @db.Decimal(6, 4)
+  purityHigh  Decimal           @db.Decimal(6, 4)
+  sensitivity Decimal           @db.Decimal(6, 4)
+  confidence  Decimal           @db.Decimal(6, 4)
+  exposure    Decimal           @db.Decimal(6, 4)
+  quality     Decimal           @default(0.5) @db.Decimal(6, 4)
+  valuationRoom Decimal         @default(0.5) @db.Decimal(6, 4)
+  riskPenalty Decimal           @default(0.2) @db.Decimal(6, 4)
+  role        String            @default("direct")
+  rationale   String
+  whyInBasket String            @default("")
+  bullPoints  Json?
+  bearPoints  Json?
+}
+
+model CoverageReport {
+  id              String      @id @default(cuid())
+  runId           String      @unique
+  run             ResearchRun @relation(fields: [runId], references: [id])
+  perAction       Json
+  overallCoverage Decimal     @db.Decimal(6, 4)
+}
+
+model Take {
+  id                String            @id @default(cuid())
+  authorId          String
+  author            User              @relation(fields: [authorId], references: [id])
+  circleId          String?
+  circle            Circle?           @relation(fields: [circleId], references: [id])
+  status            TakeStatus        @default(DRAFT)
+  visibility        Visibility        @default(PUBLIC)
+  currentRevisionId String?
+  parentTakeId      String?
+  parent            Take?             @relation("TakeTree", fields: [parentTakeId], references: [id])
+  children          Take[]            @relation("TakeTree")
+  createdAt         DateTime          @default(now())
+  revisions         TakeRevision[]
+  linksFrom         TakeLink[]        @relation("LinkFrom")
+  linksTo           TakeLink[]        @relation("LinkTo")
+  pockets           Pocket[]
+  backings          Backing[]
+  comments          Comment[]
+  stances           TakeStance[]
+  valuations        TakeValuation[]
+  cycles            ResearchCycle[]
+  briefs            DailyBrief[]
+  management        TakeManagement?
+  collectionItems   CollectionItem[]
+  decisions         AgentDecision[]
+  researchRuns      ResearchRun[]
+}
+
+model TakeRevision {
+  id             String           @id @default(cuid())
+  takeId         String
+  take           Take             @relation(fields: [takeId], references: [id])
+  number         Int
+  sentence       String
+  horizon        String?
+  falsifier      String?
+  researchRunId  String?
+  researchRun    ResearchRun?     @relation(fields: [researchRunId], references: [id])
+  targetId       String?
+  target         PortfolioTarget? @relation(fields: [targetId], references: [id])
+  changeSummary  String?
+  origin         RevisionOrigin   @default(AUTHOR)
+  agentDecisionId String?
+  createdAt      DateTime         @default(now())
+  receipt        TakeReceipt?
+  comments       Comment[]
+  valuations     TakeValuation[]
+
+  @@unique([takeId, number])
+}
+
+model TakeReceipt {
+  id              String       @id @default(cuid())
+  revisionId      String       @unique
+  revision        TakeRevision @relation(fields: [revisionId], references: [id])
+  canonicalJson   Json
+  sha256          String       @unique
+  priceSnapshotRef String?
+  anchorTxHash    String?
+  createdAt       DateTime     @default(now())
+}
+
+model TakeLink {
+  id         String       @id @default(cuid())
+  fromTakeId String
+  toTakeId   String
+  fromTake   Take         @relation("LinkFrom", fields: [fromTakeId], references: [id])
+  toTake     Take         @relation("LinkTo", fields: [toTakeId], references: [id])
+  type       TakeLinkType
+  deltaText  String
+  deltaKinds Json?
+}
+
+model PortfolioTarget {
+  id        String           @id @default(cuid())
+  cashBps   Int
+  createdAt DateTime         @default(now())
+  holdings  TargetHolding[]
+  revisions TakeRevision[]
+  proposalsFrom RebalanceProposal[] @relation("FromTarget")
+  proposalsTo   RebalanceProposal[] @relation("ToTarget")
+  decisions AgentDecision[]
+}
+
+model TargetHolding {
+  id         String          @id @default(cuid())
+  targetId   String
+  target     PortfolioTarget @relation(fields: [targetId], references: [id])
+  tokenId    String
+  token      StockToken      @relation(fields: [tokenId], references: [id])
+  weightBps  Int
+  actionId   String?
+  rationale  String
+}
+
+model Pocket {
+  id              String              @id @default(cuid())
+  userId          String
+  user            User                @relation(fields: [userId], references: [id])
+  takeId          String
+  take            Take                @relation(fields: [takeId], references: [id])
+  mode            PocketMode
+  followRevisions Boolean             @default(true)
+  status          PocketStatus        @default(ACTIVE)
+  createdAt       DateTime            @default(now())
+  accounts        LedgerAccount[]
+  txs             LedgerTransaction[]
+  valuations      Valuation[]
+  orders          Order[]
+  proposals       RebalanceProposal[]
+  mandate         Mandate?
+  backing         Backing?
+  chats           PocketChat[]
+  decisions       AgentDecision[]     @relation("PocketDecisions")
+
+  @@unique([userId, takeId, mode])
+}
+
+model LedgerAccount {
+  id      String        @id @default(cuid())
+  pocketId String
+  pocket  Pocket        @relation(fields: [pocketId], references: [id])
+  kind    AccountKind
+  tokenId String?
+  entries LedgerEntry[]
+
+  @@unique([pocketId, kind, tokenId])
+}
+
+model LedgerTransaction {
+  id         String          @id @default(cuid())
+  pocketId   String
+  pocket     Pocket          @relation(fields: [pocketId], references: [id])
+  type       LedgerTxType
+  orderLegId String?
+  txHash     String?
+  createdAt  DateTime        @default(now())
+  entries    LedgerEntry[]
+}
+
+model LedgerEntry {
+  id            String            @id @default(cuid())
+  transactionId String
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id])
+  accountId     String
+  account       LedgerAccount     @relation(fields: [accountId], references: [id])
+  amount        Decimal           @db.Decimal(78, 0)
+  usdValue      Decimal           @db.Decimal(38, 18)
+}
+
+model Valuation {
+  id              String   @id @default(cuid())
+  pocketId        String
+  pocket          Pocket   @relation(fields: [pocketId], references: [id])
+  asOf            DateTime
+  navUsd          Decimal  @db.Decimal(38, 18)
+  benchmarkNavUsd Decimal  @db.Decimal(38, 18)
+  pricesRef       Json?
+}
+
+model RebalanceProposal {
+  id              String          @id @default(cuid())
+  pocketId        String
+  pocket          Pocket          @relation(fields: [pocketId], references: [id])
+  agentDecisionId String?
+  trigger         String
+  fromTargetId    String?
+  fromTarget      PortfolioTarget? @relation("FromTarget", fields: [fromTargetId], references: [id])
+  toTargetId      String?
+  toTarget        PortfolioTarget? @relation("ToTarget", fields: [toTargetId], references: [id])
+  trades          Json
+  estCostUsd      Decimal         @db.Decimal(18, 6)
+  status          RebalanceStatus @default(PENDING)
+  expiresAt       DateTime
+  createdAt       DateTime        @default(now())
+}
+
+model Mandate {
+  id                     String      @id @default(cuid())
+  pocketId               String      @unique
+  pocket                 Pocket      @relation(fields: [pocketId], references: [id])
+  mode                   MandateMode @default(AUTO)
+  maxTurnoverDailyBps    Int         @default(1000)
+  maxTurnoverWeeklyBps   Int         @default(2500)
+  maxTradeUsd            Decimal     @default(0) @db.Decimal(38, 18)
+  maxNewNamesPerWeek     Int         @default(2)
+  allowNewNames          Boolean     @default(true)
+  cashMinBps             Int         @default(0)
+  cashMaxBps             Int         @default(2000)
+  drawdownPauseBps       Int         @default(1500)
+  minHoldDays            Int         @default(5)
+  pausedAt               DateTime?
+  pausedReason           String?
+  updatedAt              DateTime    @updatedAt
+}
+
+model TakeManagement {
+  id     String      @id @default(cuid())
+  takeId String      @unique
+  take   Take        @relation(fields: [takeId], references: [id])
+  mode   MandateMode @default(AUTO)
+}
+
+model SignerGrant {
+  id               String    @id @default(cuid())
+  walletId         String
+  wallet           Wallet    @relation(fields: [walletId], references: [id])
+  privySignerId    String
+  policyId         String?
+  allowedContracts Json
+  maxPerTxUsd      Decimal   @db.Decimal(38, 18)
+  expiresAt        DateTime
+  revokedAt        DateTime?
+}
+
+model ResearchCycle {
+  id         String           @id @default(cuid())
+  takeId     String
+  take       Take             @relation(fields: [takeId], references: [id])
+  date       DateTime
+  kind       CycleKind
+  status     CycleStatus      @default(PENDING)
+  inputsHash String?
+  costUsd    Decimal          @default(0) @db.Decimal(18, 6)
+  startedAt  DateTime         @default(now())
+  finishedAt DateTime?
+  health     HoldingHealth[]
+  brief      DailyBrief?
+  decisions  AgentDecision[]
+  evidence   EvidenceEvent[]
+}
+
+model EvidenceEvent {
+  id                 String         @id @default(cuid())
+  takeId             String
+  tokenId            String?
+  actionId           String?
+  source             EvidenceSource
+  headline           String
+  url                String?
+  publishedAt        DateTime?
+  sourceId           String?
+  relevance          Decimal        @db.Decimal(6, 4)
+  stance             Stance         @default(NEUTRAL)
+  severity           Int            @default(1)
+  processedInCycleId String?
+  cycle              ResearchCycle? @relation(fields: [processedInCycleId], references: [id])
+  createdAt          DateTime       @default(now())
+}
+
+model MarketContext {
+  id        String       @id @default(cuid())
+  date      DateTime     @unique
+  session   String
+  spxTrend  String?
+  ndxTrend  String?
+  vix       Decimal?     @db.Decimal(12, 6)
+  us10y     Decimal?     @db.Decimal(12, 6)
+  breadth   Decimal?     @db.Decimal(12, 6)
+  regime    MarketRegime @default(NEUTRAL)
+  calendar  Json?
+  raw       Json?
+}
+
+model HoldingHealth {
+  id          String        @id @default(cuid())
+  cycleId     String
+  cycle       ResearchCycle @relation(fields: [cycleId], references: [id])
+  tokenId     String
+  thesisScore Int
+  scoreDelta  Int
+  momentum    Decimal?      @db.Decimal(12, 6)
+  volatility  Decimal?      @db.Decimal(12, 6)
+  drawdown    Decimal?      @db.Decimal(12, 6)
+  newEvidence Json?
+  verdict     HealthVerdict
+  reason      String
+}
+
+model DailyBrief {
+  id           String        @id @default(cuid())
+  cycleId      String        @unique
+  cycle        ResearchCycle @relation(fields: [cycleId], references: [id])
+  takeId       String
+  take         Take          @relation(fields: [takeId], references: [id])
+  summary      String
+  thesisHealth Int
+  whatChanged  Json
+  marketNote   String
+  published    Boolean       @default(true)
+}
+
+model AgentDecision {
+  id                 String          @id @default(cuid())
+  cycleId            String?
+  cycle              ResearchCycle?  @relation(fields: [cycleId], references: [id])
+  takeId             String?
+  take               Take?           @relation(fields: [takeId], references: [id])
+  pocketId           String?
+  pocket             Pocket?         @relation("PocketDecisions", fields: [pocketId], references: [id])
+  level              AgentLevel
+  modelVersions      Json?
+  promptVersion      String?
+  inputsSnapshotR2Key String?
+  proposal           Json
+  criticResult       Json?
+  guardrailResult    Json
+  finalTargetId      String?
+  finalTarget        PortfolioTarget? @relation(fields: [finalTargetId], references: [id])
+  status             String
+  reasoning          String
+  createdAt          DateTime        @default(now())
+}
+
+model Order {
+  id                 String      @id @default(cuid())
+  pocketId           String
+  pocket             Pocket      @relation(fields: [pocketId], references: [id])
+  mode               OrderMode
+  kind               OrderKind
+  status             OrderStatus @default(DRAFT)
+  approvedAt         DateTime?
+  approvalSignature  String?
+  legs               OrderLeg[]
+  createdAt          DateTime    @default(now())
+}
+
+model OrderLeg {
+  id            String     @id @default(cuid())
+  orderId       String
+  order         Order      @relation(fields: [orderId], references: [id])
+  side          Side
+  tokenId       String
+  sellAmount    Decimal    @db.Decimal(78, 0)
+  minBuyAmount  Decimal?   @db.Decimal(78, 0)
+  status        LegStatus  @default(PENDING)
+  attempts      Int        @default(0)
+  quotes        Quote[]
+  txs           ChainTx[]
+}
+
+model Quote {
+  id         String   @id @default(cuid())
+  legId      String
+  leg        OrderLeg @relation(fields: [legId], references: [id])
+  provider   String   @default("ZEROX")
+  quoteJson  Json
+  buyAmount  String
+  price      Decimal  @db.Decimal(38, 18)
+  fees       Json?
+  expiresAt  DateTime
+}
+
+model ChainTx {
+  id                 String     @id @default(cuid())
+  legId              String?
+  leg                OrderLeg?  @relation(fields: [legId], references: [id])
+  withdrawalId       String?
+  privyTransactionId String?
+  txHash             String?
+  status             String
+  blockNumber        BigInt?
+  gasSponsoredUsd    Decimal?   @db.Decimal(18, 6)
+  error              String?
+}
+
+model Deposit {
+  id        String   @id @default(cuid())
+  walletId  String
+  wallet    Wallet   @relation(fields: [walletId], references: [id])
+  token     String
+  amount    Decimal  @db.Decimal(78, 0)
+  txHash    String   @unique
+  status    String
+  createdAt DateTime @default(now())
+}
+
+model Withdrawal {
+  id          String    @id @default(cuid())
+  walletId    String
+  wallet      Wallet    @relation(fields: [walletId], references: [id])
+  token       String
+  amount      Decimal   @db.Decimal(78, 0)
+  toAddress   String
+  txHash      String?
+  status      String
+  confirmAt   DateTime?
+  executeAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model Backing {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  takeId       String
+  take         Take       @relation(fields: [takeId], references: [id])
+  level        PocketMode
+  pocketId     String?    @unique
+  pocket       Pocket?    @relation(fields: [pocketId], references: [id])
+  amountUsd    Decimal?   @db.Decimal(18, 6)
+  revealAmount Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+
+  @@unique([userId, takeId, level])
+}
+
+model PocketChat {
+  id         String     @id @default(cuid())
+  pocketId   String
+  pocket     Pocket     @relation(fields: [pocketId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?      @relation(fields: [userId], references: [id])
+  authorType AuthorType @default(USER)
+  body       String
+  createdAt  DateTime   @default(now())
+
+  @@index([pocketId, createdAt])
+}
+
+model Circle {
+  id            String               @id @default(cuid())
+  name          String
+  topic         String
+  visibility    Visibility           @default(PRIVATE)
+  createdBy     String
+  members       CircleMember[]
+  contributions CircleContribution[]
+  takes         Take[]
+}
+
+model CircleMember {
+  id       String     @id @default(cuid())
+  circleId String
+  circle   Circle     @relation(fields: [circleId], references: [id])
+  userId   String
+  user     User       @relation(fields: [userId], references: [id])
+  role     CircleRole
+
+  @@unique([circleId, userId])
+}
+
+model CircleContribution {
+  id       String  @id @default(cuid())
+  circleId String
+  circle   Circle  @relation(fields: [circleId], references: [id])
+  takeId   String
+  userId   String
+  kind     String
+  payload  Json
+  status   String  @default("PENDING")
+}
+
+model Collection {
+  id          String             @id @default(cuid())
+  ownerId     String
+  owner       User               @relation(fields: [ownerId], references: [id])
+  title       String
+  description String             @default("")
+  visibility  Visibility         @default(PUBLIC)
+  items       CollectionItem[]
+  follows     CollectionFollow[]
+}
+
+model CollectionItem {
+  id           String     @id @default(cuid())
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id])
+  takeId       String
+  take         Take       @relation(fields: [takeId], references: [id])
+  note         String?
+  order        Int        @default(0)
+}
+
+model CollectionFollow {
+  id           String     @id @default(cuid())
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id])
+  userId       String
+
+  @@unique([collectionId, userId])
+}
+
+model Comment {
+  id         String             @id @default(cuid())
+  takeId     String
+  take       Take               @relation(fields: [takeId], references: [id])
+  revisionId String?
+  revision   TakeRevision?      @relation(fields: [revisionId], references: [id])
+  parentId   String?
+  parent     Comment?           @relation("Replies", fields: [parentId], references: [id])
+  replies    Comment[]          @relation("Replies")
+  userId     String?
+  user       User?              @relation(fields: [userId], references: [id])
+  authorType AuthorType         @default(USER)
+  kind       CommentKind
+  body       String
+  sourceUrl  String?
+  claimId    String?
+  mentions   Json?
+  isPinned   Boolean            @default(false)
+  status     String             @default("VISIBLE")
+  editedAt   DateTime?
+  createdAt  DateTime           @default(now())
+  reactions  CommentReaction[]
+}
+
+model CommentReaction {
+  id        String       @id @default(cuid())
+  commentId String
+  comment   Comment      @relation(fields: [commentId], references: [id])
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  type      ReactionType
+
+  @@unique([commentId, userId, type])
+}
+
+model TakeStance {
+  id        String     @id @default(cuid())
+  takeId    String
+  take      Take       @relation(fields: [takeId], references: [id])
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  stance    UserStance
+  updatedAt DateTime   @updatedAt
+
+  @@unique([takeId, userId])
+}
+
+model TakeValuation {
+  id                   String       @id @default(cuid())
+  takeId               String
+  take                 Take         @relation(fields: [takeId], references: [id])
+  revisionId           String?
+  revision             TakeRevision? @relation(fields: [revisionId], references: [id])
+  asOf                 DateTime
+  indexValue           Decimal      @db.Decimal(38, 18)
+  benchmarkIndex       Decimal      @db.Decimal(38, 18)
+  holdingContributions Json?
+  isDaily              Boolean      @default(false)
+
+  @@index([takeId, asOf])
+}
+
+model Follow {
+  id         String @id @default(cuid())
+  followerId String
+  follower   User   @relation("Follower", fields: [followerId], references: [id])
+  targetType String
+  targetId   String
+
+  @@unique([followerId, targetType, targetId])
+}
+
+model BeliefMapSnapshot {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  computedAt      DateTime @default(now())
+  overlap         Json
+  repeatedActions Json
+  contradictions  Json
+}
+
+model ReputationSnapshot {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  computedAt  DateTime @default(now())
+  dimensions  Json
+  sampleSizes Json
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String
+  payload   Json
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+}
+
+model Report {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+  targetType String
+  targetId  String
+  reason    String
+  status    String  @default("OPEN")
+}
+
+model ModerationAction {
+  id         String   @id @default(cuid())
+  targetType String
+  targetId   String
+  action     String
+  actorId    String
+  createdAt  DateTime @default(now())
+}
+
+model OutboxEvent {
+  id          String    @id @default(cuid())
+  topic       String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
+}
+
+model ProcessedJob {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  createdAt DateTime @default(now())
+}
+
+model WebhookDelivery {
+  id        String   @id @default(cuid())
+  source    String
+  payload   Json
+  processed Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model FeatureFlag {
+  key     String  @id
+  enabled Boolean @default(false)
+  payload Json?
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  payload   Json
+  createdAt DateTime @default(now())
+}

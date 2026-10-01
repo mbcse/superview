@@ -1,0 +1,22 @@
+[
+  { "id": "robots", "sentence": "humanoid robots are coming to every home" },
+  { "id": "alcohol", "sentence": "My closest friends are drinking less alcohol." },
+  { "id": "irl", "sentence": "IRL experiences are on the rise." },
+  { "id": "nvda", "sentence": "NVDA to the moon" },
+  { "id": "grid", "sentence": "The power grid cannot keep up with data centers." },
+  { "id": "glp1", "sentence": "GLP-1 drugs will reshape food and apparel demand." },
+  { "id": "space", "sentence": "Launch costs keep falling and space becomes infrastructure." },
+  { "id": "quantum", "sentence": "Fault-tolerant quantum computing is still a decade away." },
+  { "id": "attention", "sentence": "People pay for attention." },
+  { "id": "energy", "sentence": "Energy gets scarce." },
+  { "id": "vague", "sentence": "AI will change everything" },
+  { "id": "joke", "sentence": "we're all gonna live in the metaverse lol" },
+  { "id": "china", "sentence": "China is winning the EV supply chain." },
+  { "id": "housing", "sentence": "Nobody can afford a house and that's not changing." },
+  { "id": "defense", "sentence": "Europe has to rearm." },
+  { "id": "semis", "sentence": "Foundry capacity is the bottleneck." },
+  { "id": "health", "sentence": "People want to live to 120." },
+  { "id": "single", "sentence": "just buy apple" },
+  { "id": "mash", "sentence": "asdkjfh asdkjfh qqq", "expectRefuse": true },
+  { "id": "emptyish", "sentence": "!!!!????", "expectRefuse": true }
+]

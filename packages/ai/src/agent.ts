@@ -1,0 +1,238 @@
+import { generateText } from "ai";
+import { prisma } from "@takeandstake/db";
+import { applyGuardrails, isInfraCommentBody } from "@takeandstake/core";
+import { genObject } from "./generate.js";
+import { criticModel, researchModel, socialModel } from "./llm.js";
+import { fill, MANUS_MEMO_PROMPT, MONITOR_PROMPT, THREAD_REPLY_PROMPT } from "./prompts/index.js";
+import { monitorSchema, threadReplySchema } from "./prompts/schemas.js";
+import { runWebNews } from "./web-research.js";
+
+export async function runDailyMonitor(takeId: string) {
+  const take = await prisma.take.findUnique({
+    where: { id: takeId },
+    include: {
+      revisions: {
+        orderBy: { number: "desc" },
+        take: 1,
+        include: { target: { include: { holdings: { include: { token: true } } } }, researchRun: { include: { thesis: true } } }
+      },
+      comments: { orderBy: { createdAt: "desc" }, take: 8 },
+      pockets: { include: { mandate: true } }
+    }
+  });
+  if (!take) throw new Error("take_not_found");
+  const rev = take.revisions[0];
+  const holdings = rev?.target?.holdings ?? [];
+  let evidence = "";
+  try {
+    evidence = await runWebNews(
+      rev?.sentence ?? "",
+      holdings.map((h) => h.token.symbol)
+    );
+  } catch {
+    evidence = "No fresh web evidence this cycle.";
+  }
+  const cycle = await prisma.researchCycle.create({
+    data: { takeId, date: new Date(), kind: "DAILY", status: "RUNNING" }
+  });
+  const mandateLabel = take.pockets.some((p) => p.mandate?.mode === "APPROVAL")
+    ? "Ask first on some pockets; Autopilot elsewhere"
+    : "Autopilot default";
+  const out = await genObject({
+    model: researchModel(),
+    schema: monitorSchema,
+    prompt: fill(MONITOR_PROMPT, {
+      thesis: JSON.stringify({ sentence: rev?.sentence, thesis: rev?.researchRun?.thesis }),
+      positions: JSON.stringify(holdings.map((h) => ({ symbol: h.token.symbol, weightBps: h.weightBps }))),
+      evidence,
+      mandate: mandateLabel,
+      driftThreshold: "200 bps"
+    })
+  });
+  const bySymbol = new Map(holdings.map((h) => [h.token.symbol.toUpperCase(), h]));
+  const proposal = {
+    noChange: out.decision === "no_change",
+    cashBps: rev?.target?.cashBps ?? 500,
+    holdings: out.trades.map((t) => ({
+      tokenId: bySymbol.get(t.symbol.toUpperCase())?.tokenId ?? t.symbol,
+      action: (t.action === "exit" ? "remove" : t.action === "add" ? "add" : t.action === "trim" || t.action === "decrease" ? "decrease" : "increase") as
+        | "keep"
+        | "increase"
+        | "decrease"
+        | "add"
+        | "remove",
+      conviction: 0.6,
+      reason: t.reason,
+      evidenceIds: t.sourceIds,
+      tiedToTakeAction: true
+    }))
+  };
+  const guard = applyGuardrails(
+    proposal,
+    holdings.map((h) => ({ tokenId: h.tokenId, weightBps: h.weightBps })),
+    {
+      maxTurnoverDailyBps: 1000,
+      maxTurnoverWeeklyBps: 2500,
+      allowNewNames: true,
+      maxNewNamesPerWeek: 2,
+      cashMinBps: 0,
+      cashMaxBps: 2000,
+      skipTradeUsd: 5
+    },
+    {}
+  );
+  const decision = await prisma.agentDecision.create({
+    data: {
+      cycleId: cycle.id,
+      takeId,
+      level: "TAKE",
+      proposal: out,
+      guardrailResult: guard,
+      status: out.decision === "no_change" || !guard.ok ? "NO_CHANGE" : "PROPOSED",
+      reasoning: out.thesisHealthReason
+    }
+  });
+  if (out.decision !== "no_change" && guard.ok) {
+    for (const pocket of take.pockets.filter((p) => p.status === "ACTIVE" && p.mode !== "WATCH")) {
+      const askFirst = pocket.mandate?.mode === "APPROVAL";
+      const row = await prisma.rebalanceProposal.create({
+        data: {
+          pocketId: pocket.id,
+          agentDecisionId: decision.id,
+          trigger: out.decision,
+          trades: out.trades,
+          estCostUsd: 0,
+          status: askFirst ? "PENDING" : "AUTO_EXECUTED",
+          expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
+        }
+      });
+      await prisma.notification.create({
+        data: {
+          userId: pocket.userId,
+          type: askFirst ? "approval" : "decision",
+          payload: { takeId, proposalId: row.id, decision: out.decision, post: out.post }
+        }
+      });
+    }
+  }
+  await prisma.dailyBrief.create({
+    data: {
+      cycleId: cycle.id,
+      takeId,
+      summary: out.post,
+      thesisHealth: out.thesisHealth,
+      whatChanged: out.trades.map((t) => `${t.symbol} ${t.action}`),
+      marketNote: evidence.slice(0, 500)
+    }
+  });
+  if (!isInfraCommentBody(out.post)) {
+    await prisma.comment.create({
+      data: {
+        takeId,
+        revisionId: take.currentRevisionId,
+        authorType: "AGENT",
+        kind: "AGENT_BRIEF",
+        body: out.post
+      }
+    });
+  }
+  await prisma.researchCycle.update({ where: { id: cycle.id }, data: { status: "DONE", finishedAt: new Date() } });
+  return out;
+}
+
+export async function replyToComment(commentId: string) {
+  const comment = await prisma.comment.findUnique({
+    where: { id: commentId },
+    include: {
+      take: {
+        include: {
+          revisions: { orderBy: { number: "desc" }, take: 1, include: { target: { include: { holdings: { include: { token: true } } } }, researchRun: { include: { thesis: true } } } },
+          comments: { orderBy: { createdAt: "desc" }, take: 12 }
+        }
+      }
+    }
+  });
+  if (!comment) throw new Error("comment_not_found");
+  const rev = comment.take.revisions[0];
+  const out = await genObject({
+    model: socialModel(),
+    schema: threadReplySchema,
+    prompt: fill(THREAD_REPLY_PROMPT, {
+      view: rev?.sentence ?? "",
+      basket: JSON.stringify(rev?.target?.holdings.map((h) => ({ symbol: h.token.symbol, weightBps: h.weightBps, why: h.rationale })) ?? []),
+      research: JSON.stringify(rev?.researchRun?.thesis ?? {}),
+      thread: comment.take.comments
+        .slice()
+        .reverse()
+        .map((c) => `${c.authorType}: ${c.body}`)
+        .join("\n")
+        .slice(-2500),
+      comment: comment.body
+    })
+  });
+  if (isInfraCommentBody(out.body)) return null;
+  return prisma.comment.create({
+    data: {
+      takeId: comment.takeId,
+      revisionId: comment.revisionId,
+      parentId: comment.id,
+      authorType: "AGENT",
+      kind: comment.kind === "QUESTION" ? "UPDATE" : "AGENT_BRIEF",
+      body: out.body
+    }
+  });
+}
+
+export async function writeManusMemo(takeId: string) {
+  const take = await prisma.take.findUnique({
+    where: { id: takeId },
+    include: {
+      revisions: {
+        orderBy: { number: "desc" },
+        take: 1,
+        include: { target: { include: { holdings: { include: { token: true } } } }, researchRun: { include: { thesis: true, candidates: { include: { score: true } } } } }
+      }
+    }
+  });
+  if (!take) return null;
+  const rev = take.revisions[0];
+  const prompt = fill(MANUS_MEMO_PROMPT, {
+    view: rev?.sentence ?? "",
+    interpretation: rev?.researchRun?.thesis?.interpretation ?? "",
+    holdings: JSON.stringify(rev?.target?.holdings ?? []),
+    evidence: JSON.stringify(rev?.researchRun?.candidates.map((c) => c.score?.rationale) ?? [])
+  });
+  let body = "";
+  const manus = process.env.MANUS_API_KEY?.trim();
+  if (manus) {
+    try {
+      const res = await fetch("https://api.manus.im/v1/tasks", {
+        method: "POST",
+        headers: { authorization: `Bearer ${manus}`, "content-type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+      const text = await res.text();
+      body = res.ok && !isInfraCommentBody(text) ? text : "";
+    } catch {
+      body = "";
+    }
+  }
+  if (!body || isInfraCommentBody(body)) {
+    const text = await generateText({
+      model: criticModel() as never,
+      prompt
+    });
+    body = text.text;
+  }
+  if (!body.trim() || isInfraCommentBody(body)) return null;
+  return prisma.comment.create({
+    data: {
+      takeId,
+      revisionId: take.currentRevisionId,
+      authorType: "AGENT",
+      kind: "UPDATE",
+      body: body.slice(0, 8000),
+      isPinned: true
+    }
+  });
+}

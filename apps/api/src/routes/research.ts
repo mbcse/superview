@@ -1,0 +1,116 @@
+import { Router } from "express";
+import { Queue } from "bullmq";
+import { prisma } from "@takeandstake/db";
+import { takeSentenceSchema, log } from "@takeandstake/shared";
+import { requireAuth } from "../middleware/auth.js";
+import { createRedis, dropRedis, redis } from "../redis.js";
+import { portfolioFromRun, withDraftPayload } from "../services/portfolio-from-run.js";
+
+const researchQueue = new Queue("research", { connection: redis });
+const agentQueue = new Queue("agent", { connection: redis });
+
+export const researchRouter = Router();
+
+researchRouter.post("/v1/research", requireAuth, async (req, res) => {
+  const parsed = takeSentenceSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const take = await prisma.take.create({ data: { authorId: req.user!.id, status: "DRAFT" } });
+  await prisma.takeRevision.create({
+    data: {
+      takeId: take.id,
+      number: 1,
+      sentence: parsed.data.sentence,
+      origin: "AUTHOR"
+    }
+  });
+  const run = await prisma.researchRun.create({
+    data: {
+      takeId: take.id,
+      status: "PENDING",
+      stage: "queued",
+      modelVersions: { view: parsed.data.sentence }
+    }
+  });
+  await prisma.researchEvent.create({
+    data: { runId: run.id, stage: "queued", message: "Queued for research" }
+  });
+  await researchQueue.add("run", { runId: run.id }, {
+    jobId: run.id,
+    attempts: 6,
+    backoff: { type: "exponential", delay: 15_000 }
+  });
+  log("api", "research queued", { run: run.id, view: parsed.data.sentence });
+  res.json({ takeId: take.id, runId: run.id, status: run.status });
+});
+
+researchRouter.get("/v1/research/:runId", requireAuth, async (req, res) => {
+  const run = await prisma.researchRun.findUnique({
+    where: { id: String(req.params.runId) },
+    include: {
+      thesis: true,
+      actions: true,
+      events: { orderBy: { createdAt: "asc" } },
+      candidates: { include: { score: true, token: true } }
+    }
+  });
+  if (!run) return res.status(404).json({ error: "not_found" });
+  const draft = [...run.events].reverse().find((e) => e.stage === "draft");
+  const constructed = portfolioFromRun(withDraftPayload(run, draft?.payload));
+  res.json({ run, portfolio: constructed, spec: run.thesis });
+});
+
+researchRouter.get("/v1/research/:runId/stream", requireAuth, async (req, res) => {
+  const runId = String(req.params.runId);
+  res.setHeader("content-type", "text/event-stream");
+  res.setHeader("cache-control", "no-cache");
+  res.setHeader("connection", "keep-alive");
+  const send = (data: unknown) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  const existing = await prisma.researchEvent.findMany({ where: { runId }, orderBy: { createdAt: "asc" } });
+  for (const e of existing) send({ stage: e.stage, message: e.message, payload: e.payload, at: e.createdAt });
+  const sub = createRedis();
+  await sub.subscribe(`research:${runId}`);
+  sub.on("message", (_ch: string, message: string) => {
+    try {
+      send(JSON.parse(message));
+    } catch {
+      send({ message });
+    }
+  });
+  const timer = setInterval(async () => {
+    const run = await prisma.researchRun.findUnique({ where: { id: runId } });
+    if (!run) return;
+    if (run.status === "DRAFT" || run.status === "FAILED" || run.status === "DEEP_DONE") {
+      send({ stage: "done", status: run.status });
+      clearInterval(timer);
+      dropRedis(sub);
+      res.end();
+    }
+  }, 2000);
+  req.on("close", () => {
+    clearInterval(timer);
+    dropRedis(sub);
+  });
+});
+
+researchRouter.post("/v1/research/:runId/draft", requireAuth, async (req, res) => {
+  const run = await prisma.researchRun.findUnique({
+    where: { id: String(req.params.runId) },
+    include: {
+      thesis: true,
+      events: { orderBy: { createdAt: "asc" } },
+      candidates: { include: { score: true, token: true } }
+    }
+  });
+  if (!run) return res.status(404).json({ error: "not_found" });
+  if (run.status !== "DRAFT" && run.status !== "DEEP_DONE") {
+    return res.status(202).json({ pending: true, status: run.status, stage: run.stage });
+  }
+  const draft = [...run.events].reverse().find((e) => e.stage === "draft");
+  res.json({ draft: true, portfolio: portfolioFromRun(withDraftPayload(run, draft?.payload)), run });
+});
+
+researchRouter.post("/v1/takes/:id/memo", requireAuth, async (req, res) => {
+  await agentQueue.add("memo", { takeId: String(req.params.id) });
+  res.json({ queued: true });
+});
+

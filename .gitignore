@@ -1,0 +1,13 @@
+node_modules
+dist
+.next
+.turbo
+.env
+.env.local
+coverage
+*.log
+.DS_Store
+apps/web/.next
+packages/db/generated
+.pgdata
+

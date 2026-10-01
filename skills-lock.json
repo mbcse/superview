@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "skills": {
+    "apple-design": {
+      "source": "dickwu/apple-design-skill",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "546d29fc8b607454f3656426b3470030d48a87927746d4609c2901a6e9f38e2f"
+    },
+    "design-md": {
+      "source": "google-labs-code/stitch-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/stitch-utilities/skills/design-md/SKILL.md",
+      "computedHash": "d3a4c7d2f2715a33662c8b06ffc16035d01965a8b4ed81c2958fb22ae94760f8"
+    },
+    "design-taste-frontend": {
+      "source": "leonxlnx/taste-skill",
+      "sourceType": "github",
+      "skillPath": "skills/taste-skill/SKILL.md",
+      "computedHash": "6d838b246d0e35d0b53f4f23f98ba7a1dd561937e64f7d0c7553b0928e376c3e"
+    },
+    "emil-design-eng": {
+      "source": "emilkowalski/skills",
+      "sourceType": "github",
+      "skillPath": "skills/emil-design-eng/SKILL.md",
+      "computedHash": "51f2537e04d15911b41d78e2de24c36a0e26d41beae15e82a954fe5496a5eda9"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "89496d5dd00f4810205f351759594fc2742bf8eea85a2f2b2d1de59f4bd91576"
+    },
+    "impeccable": {
+      "source": "pbakaus/impeccable",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/impeccable/SKILL.md",
+      "computedHash": "f7c4e03bef91154273d2dc3b62aff829cf4ab1b1f16e6b98c8c6a31be4405318"
+    },
+    "inspiration": {
+      "source": "magicpatterns/agent-plugins",
+      "sourceType": "github",
+      "skillPath": "claude-code/plugins/magic-patterns/skills/inspiration/SKILL.md",
+      "computedHash": "8eced23c5c7637e717fb58e95c8647a2f5da993d23120065ccedcdcce00f2d09"
+    },
+    "integrate-magic-patterns-design": {
+      "source": "magicpatterns/agent-plugins",
+      "sourceType": "github",
+      "skillPath": "claude-code/plugins/magic-patterns/skills/integrate-magic-patterns-design/SKILL.md",
+      "computedHash": "2736e72094245322b7e2f64015c816dc566b69c70488422adca8c2b676d5ea8d"
+    },
+    "prototype": {
+      "source": "magicpatterns/agent-plugins",
+      "sourceType": "github",
+      "skillPath": "claude-code/plugins/magic-patterns/skills/prototype/SKILL.md",
+      "computedHash": "1ec9756bd14959971a88be9cf8d8e77b2361e3bfa59dab754a7c755d712418a8"
+    },
+    "recreate-as-raw-html": {
+      "source": "magicpatterns/agent-plugins",
+      "sourceType": "github",
+      "skillPath": "claude-code/plugins/magic-patterns/skills/recreate-as-raw-html/SKILL.md",
+      "computedHash": "804032f13ba881fd5bf06e7d20470fcbd6eb97ebeb780767f6648c54b6e7fe0b"
+    },
+    "recreate-as-react": {
+      "source": "magicpatterns/agent-plugins",
+      "sourceType": "github",
+      "skillPath": "claude-code/plugins/magic-patterns/skills/recreate-as-react/SKILL.md",
+      "computedHash": "80e7119e75c7e485d550c5d973ffbc3a134612e569caf10301e1fae54e50256b"
+    },
+    "ui-ux-pro-max": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/ui-ux-pro-max/SKILL.md",
+      "computedHash": "daa1a7be30edc9cda6b31da821c5285a9f421ee3136dd6335ff47e917215d1a5"
+    },
+    "upload-to-magic-patterns": {
+      "source": "magicpatterns/agent-plugins",
+      "sourceType": "github",
+      "skillPath": "claude-code/plugins/magic-patterns/skills/upload-to-magic-patterns/SKILL.md",
+      "computedHash": "30b865cb36cb1e5134b190d6fd7d14af1b03e1f02d0df3be7a9ba2e10ee109ba"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/react-best-practices/SKILL.md",
+      "computedHash": "3219a1944e404ffc14d1d9d6aef6dd2e3855b81387ee0a044ccbfe14d34c2357"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/web-design-guidelines/SKILL.md",
+      "computedHash": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474"
+    }
+  }
+}

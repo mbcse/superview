@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "magic-patterns": {
+      "url": "https://mcp.magicpatterns.com/mcp"
+    },
+    "figma": {
+      "url": "https://mcp.figma.com/mcp"
+    }
+  }
+}

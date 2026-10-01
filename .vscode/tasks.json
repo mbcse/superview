@@ -1,0 +1,144 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev all",
+      "detail": "Kill leftover ports, then Postgres, Redis, API, worker, and web",
+      "dependsOrder": "sequence",
+      "dependsOn": ["kill ports", "infra", "dev apps"],
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "kill ports",
+      "detail": "Free 3000/3001/3010/4000 and leftover api/worker/web processes",
+      "type": "shell",
+      "command": "for p in 3000 3001 3010 4000; do pids=$(lsof -nP -tiTCP:$p -sTCP:LISTEN 2>/dev/null || true); if [ -n \"$pids\" ]; then echo killing :$p $pids; kill -9 $pids 2>/dev/null || true; fi; done; pkill -9 -f '${workspaceFolder}/apps/api' 2>/dev/null || true; pkill -9 -f '${workspaceFolder}/apps/worker' 2>/dev/null || true; pkill -9 -f '${workspaceFolder}/apps/web' 2>/dev/null || true; echo ports cleared",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev apps",
+      "dependsOrder": "parallel",
+      "dependsOn": ["api", "worker", "web"],
+      "problemMatcher": []
+    },
+    {
+      "label": "infra",
+      "type": "shell",
+      "command": "docker compose up -d postgres redis",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {}
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "api",
+      "type": "shell",
+      "command": "pnpm dev",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/api"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "dev",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "api",
+          "pattern": {
+            "regexp": "^(unused)(unused)(unused)$",
+            "file": 1,
+            "location": 2,
+            "message": 3
+          },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "listening on"
+        }
+      }
+    },
+    {
+      "label": "worker",
+      "type": "shell",
+      "command": "pnpm dev",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/worker"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "dev",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "worker",
+          "pattern": {
+            "regexp": "^(unused)(unused)(unused)$",
+            "file": 1,
+            "location": 2,
+            "message": 3
+          },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "worker scheduled"
+        }
+      }
+    },
+    {
+      "label": "web",
+      "type": "shell",
+      "command": "pnpm dev",
+      "options": {
+        "cwd": "${workspaceFolder}/apps/web"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "dev",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": {
+        "owner": "web",
+          "pattern": {
+            "regexp": "^(unused)(unused)(unused)$",
+            "file": 1,
+            "location": 2,
+            "message": 3
+          },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "(Ready|Local:)"
+        }
+      }
+    }
+  ]
+}
