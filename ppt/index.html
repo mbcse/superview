@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SuperView Pitch Deck</title>
+
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://github.com/mbcse/superview">
+    <meta property="og:title" content="SuperView Pitch Deck">
+    <meta property="og:description" content="Write a market belief. SuperView turns it into a researched Stock Token basket and tracks it live vs the S&P 500.">
+    <meta property="og:image" content="superview-icon.svg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="SuperView Pitch Deck">
+    <meta name="twitter:description" content="Write a view. An agent builds the basket. Watch it play out vs the S&P 500.">
+    <meta name="twitter:image" content="superview-icon.svg">
+
+    <link rel="stylesheet" href="slides.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+</head>
+<body>
+
+<canvas id="particle-canvas"></canvas>
+
+<div class="ppt-container investor-deck">
+
+    <!-- 1. HERO -->
+    <section class="slide investor-slide investor-hero active">
+        <div class="grid-overlay"></div>
+        <div class="deck-topline anim-fade-up d1">
+            <div class="brand-badge">
+                <img class="brand-badge__icon" src="superview-icon.svg" alt="SuperView logo">
+                <span class="brand-badge__text">SuperView</span>
+            </div>
+            <span class="deck-stage">Hackathon Pitch</span>
+        </div>
+        <h1 class="hero-statement anim-fade-up d2">
+            <span class="hero-title-line"><span>Write a belief.</span><span class="hero-accent"> Get a portfolio.</span><span> See if it beats the S&amp;P.</span></span>
+        </h1>
+        <div class="hero-stack anim-fade-up d3">
+            <span class="hero-stack-item">One sentence in</span>
+            <span class="hero-stack-item">Researched basket out</span>
+            <span class="hero-stack-item">Live vs S&amp;P 500</span>
+            <span class="hero-stack-item">Paper money first</span>
+        </div>
+        <div class="hero-strip anim-fade-up d4">
+            <strong>Robinhood Chain</strong>
+            <strong>Stock Tokens</strong>
+            <strong>Social feed</strong>
+            <strong>Real market prices</strong>
+        </div>
+        <p class="hero-subtitle anim-fade-up d5">SuperView is a social desk for market ideas. You type a view. An agent finds eligible companies, builds a basket, and shows whether that idea is winning on live markets.</p>
+    </section>
+
+    <!-- 2. PROBLEM -->
+    <section class="slide investor-slide investor-survey">
+        <div class="grid-overlay"></div>
+        <div class="investor-header investor-header--center anim-fade-up d1">
+            <span class="survey-kicker">The problem</span>
+            <h2>People have opinions about markets. <span class="team-accent">Almost nothing turns those opinions into a testable portfolio.</span></h2>
+            <p class="survey-lead">Today an idea dies in ChatGPT tabs, Twitter threads, and brokerage watchlists. Nobody can cleanly answer: was that view actually good?</p>
+        </div>
+        <div class="survey-pain-grid survey-pain-grid--four anim-scale-in d2">
+            <article class="survey-pain-card">
+                <div class="survey-pain-visual" aria-hidden="true">
+                    <svg viewBox="0 0 160 90" fill="none" xmlns="http://www.w3.org/2000/svg" stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="160" height="90" rx="6" fill="#111"/>
+                        <rect x="24" y="16" width="58" height="58" rx="8" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+                        <path d="M36 32h34M36 44h28M36 56h16" stroke="rgba(255,255,255,0.32)" stroke-width="2"/>
+                        <path d="M92 30h40M92 44h28M92 58h34" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+                        <circle cx="128" cy="30" r="3" fill="#FF9500"/>
+                    </svg>
+                </div>
+                <strong>Ideas stay as text</strong>
+                <p class="pain-card-note">A hot take never becomes a sized basket you can hold.</p>
+            </article>
+            <article class="survey-pain-card">
+                <div class="survey-pain-visual" aria-hidden="true">
+                    <svg viewBox="0 0 160 90" fill="none" xmlns="http://www.w3.org/2000/svg" stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="160" height="90" rx="6" fill="#111"/>
+                        <rect x="18" y="20" width="36" height="48" rx="6" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+                        <rect x="62" y="20" width="36" height="48" rx="6" stroke="#FF9500" stroke-width="2"/>
+                        <rect x="106" y="20" width="36" height="48" rx="6" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+                        <path d="M70 36h20M70 48h14" stroke="#FF9500" stroke-width="2"/>
+                        <path d="M118 42l8 16H110l8-16Z" stroke="#FF3B30" stroke-width="2"/>
+                    </svg>
+                </div>
+                <strong>Research is messy</strong>
+                <p class="pain-card-note">Everyone picks names differently. Risk limits are optional or missing.</p>
+            </article>
+            <article class="survey-pain-card">
+                <div class="survey-pain-visual" aria-hidden="true">
+                    <svg viewBox="0 0 160 90" fill="none" xmlns="http://www.w3.org/2000/svg" stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="160" height="90" rx="6" fill="#111"/>
+                        <path d="M22 70h116M22 70V18" stroke="rgba(255,255,255,0.18)" stroke-width="2"/>
+                        <path d="M28 58c18-4 28-22 40-26 10-3 16 8 24 6 12-2 20-18 36-16" stroke="#FF9500" stroke-width="2"/>
+                        <path d="M68 78h60" stroke="#FF3B30" stroke-width="2"/>
+                        <path d="M68 74v8M128 74v8" stroke="#FF3B30" stroke-width="2"/>
+                    </svg>
+                </div>
+                <strong>No scoreboard</strong>
+                <p class="pain-card-note">FinTwit is loud. Almost nobody posts a view with a live S&amp;P comparison.</p>
+            </article>
+            <article class="survey-pain-card">
+                <div class="survey-pain-visual" aria-hidden="true">
+                    <svg viewBox="0 0 160 90" fill="none" xmlns="http://www.w3.org/2000/svg" stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="160" height="90" rx="6" fill="#111"/>
+                        <path d="M34 36h40a8 8 0 0 1 8 8v10a8 8 0 0 1-8 8H42l-10 8v-8h2a8 8 0 0 1-8-8V44a8 8 0 0 1 8-8Z" stroke="rgba(255,255,255,0.28)" stroke-width="2"/>
+                        <path d="M88 28h36a8 8 0 0 1 8 8v10a8 8 0 0 1-8 8h-28l-10 8v-8h-6a8 8 0 0 1-8-8V36a8 8 0 0 1 8-8Z" stroke="#FF9500" stroke-width="2"/>
+                        <path d="M100 42h18M100 50h12" stroke="#FF9500" stroke-width="2"/>
+                    </svg>
+                </div>
+                <strong>Social ≠ portfolio</strong>
+                <p class="pain-card-note">You can like a take. You cannot fund it, copy it, or prove it later.</p>
+            </article>
+        </div>
+    </section>
+
+    <!-- 3. SOLUTION -->
+    <section class="slide investor-slide investor-before-after">
+        <div class="grid-overlay"></div>
+        <div class="investor-header investor-header--center anim-fade-up d1">
+            <span class="survey-kicker">The solution</span>
+            <h2>SuperView turns one sentence into a <span class="team-accent">live, benchmarked portfolio.</span></h2>
+        </div>
+        <div class="comparison-shell anim-scale-in d2">
+            <div class="comparison-side comparison-side--before">
+                <span class="comparison-label">Before</span>
+                <h2>Opinion without a book</h2>
+                <ul class="comparison-list">
+                    <li>Idea lives in a chat or tweet</li>
+                    <li>Names picked by gut feel</li>
+                    <li>No hard risk limits</li>
+                    <li>Performance checked weeks later, if ever</li>
+                    <li>Hard for others to copy or fund</li>
+                </ul>
+            </div>
+            <div class="comparison-side comparison-side--after">
+                <span class="comparison-label comparison-label--after">With SuperView</span>
+                <h2>Belief → basket → scoreboard</h2>
+                <ul class="comparison-list">
+                    <li><strong>Write a view</strong><span>one clear market sentence</span></li>
+                    <li><strong>Agent researches</strong><span>only Robinhood Chain names</span></li>
+                    <li><strong>Code sizes it</strong><span>cash, sector, issuer caps</span></li>
+                    <li><strong>Publish + track</strong><span>live marks vs S&amp;P 500</span></li>
+                    <li><strong>Paper invest</strong><span>real prices, simulated cash</span></li>
+                </ul>
+            </div>
+        </div>
+        <p class="build-proof-next">In plain words: SuperView is LinkedIn for market beliefs, with a real portfolio attached to every post.</p>
+    </section>
+
+    <!-- 4. PRODUCT FLOW -->
+    <section class="slide investor-slide investor-product-flow">
+        <div class="grid-overlay"></div>
+        <div class="investor-header investor-header--center anim-fade-up d1">
+            <span class="survey-kicker">How the product works</span>
+            <h2>Six steps from sentence to <span class="team-accent">scoreboard.</span></h2>
+            <p class="survey-lead">This is the loop judges should remember. Everything else in the app supports this path.</p>
+        </div>
+        <div class="sv-flow anim-scale-in d2">
+            <article class="sv-flow-step">
+                <span class="sv-flow-num">01</span>
+                <strong>Write a view</strong>
+                <p>“AI power demand will keep climbing.”</p>
+            </article>
+            <span class="sv-flow-arrow" aria-hidden="true">→</span>
+            <article class="sv-flow-step">
+                <span class="sv-flow-num">02</span>
+                <strong>Research</strong>
+                <p>Agent screens the live Robinhood catalog.</p>
+            </article>
+            <span class="sv-flow-arrow" aria-hidden="true">→</span>
+            <article class="sv-flow-step">
+                <span class="sv-flow-num">03</span>
+                <strong>Build basket</strong>
+                <p>Sizes holdings with hard portfolio rules.</p>
+            </article>
+            <span class="sv-flow-arrow" aria-hidden="true">→</span>
+            <article class="sv-flow-step">
+                <span class="sv-flow-num">04</span>
+                <strong>Publish</strong>
+                <p>Post hits the feed with a locked receipt.</p>
+            </article>
+            <span class="sv-flow-arrow" aria-hidden="true">→</span>
+            <article class="sv-flow-step">
+                <span class="sv-flow-num">05</span>
+                <strong>Track vs S&amp;P</strong>
+                <p>Live prices. Clear win / lose line.</p>
+            </article>
+            <span class="sv-flow-arrow" aria-hidden="true">→</span>
+            <article class="sv-flow-step sv-flow-step--accent">
+                <span class="sv-flow-num">06</span>
+                <strong>Paper invest</strong>
+                <p>Put simulated cash behind the idea.</p>
+            </article>
+        </div>
+        <div class="sv-flow-example anim-fade-up d3">
+            <div>
+                <span>Example input</span>
+                <strong>“Power demand will keep rising.”</strong>
+            </div>
+            <div>
+                <span>Example output</span>
+                <strong>Constrained basket of Stock Tokens + live S&amp;P chart</strong>
+            </div>
+            <div>
+                <span>Default mode</span>
+                <strong>Paper book · real Robinhood prices</strong>
+            </div>
+        </div>
+    </section>
+
+    <!-- 5. WHY DIFFERENT / FEATURES -->
+    <section class="slide investor-slide investor-capabilities">
+        <div class="grid-overlay"></div>
+        <div class="investor-header investor-header--center anim-fade-up d1">
+            <h2>Why this is different — and the features that make it <span class="team-accent">stick.</span></h2>
+            <p class="capability-subline">Not another AI chat that dumps ticker names. Not another brokerage skin. A full path from belief to book.</p>
+        </div>
+        <div class="capability-board anim-scale-in d2">
+            <div class="capability-lead">
+                <span class="capability-tag">Core object</span>
+                <strong>The View</strong>
+                <span>One sentence, researched holdings, live performance, comments, and invest — all on the same object. That is the product.</span>
+            </div>
+            <div class="capability-cell">
+                <span class="capability-tag">Feature</span>
+                <strong>Research agent</strong>
+                <p>Multi-step pipeline: interpret → screen → diligence → size → critic. If too few names fit, it refuses instead of faking a book.</p>
+            </div>
+            <div class="capability-cell">
+                <span class="capability-tag">Feature</span>
+                <strong>Hard constraints</strong>
+                <p>Cash, company, sector, and role caps live in code. The model suggests. Rules decide what actually gets into the basket.</p>
+            </div>
+            <div class="capability-cell">
+                <span class="capability-tag">Feature</span>
+                <strong>Live vs S&amp;P 500</strong>
+                <p>Every published view carries a scoreboard from day one. Opinions get a mark, not vibes.</p>
+            </div>
+            <div class="capability-cell">
+                <span class="capability-tag">Feature</span>
+                <strong>Paper ledger</strong>
+                <p>Simulated USDG with live Robinhood prices. Practice the idea before real money is on the line.</p>
+            </div>
+            <div class="capability-cell">
+                <span class="capability-tag">Feature</span>
+                <strong>Locked receipts</strong>
+                <p>Publishing hashes the basket. The original book cannot quietly change after the fact.</p>
+            </div>
+            <div class="capability-cell">
+                <span class="capability-tag">Feature</span>
+                <strong>Investing feed</strong>
+                <p>Follow ideas, not only people. Copy a view, comment on it, or put paper money behind it.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 6. COMPOSE -->
+    <section class="slide investor-slide investor-proof investor-proof-split">
+        <div class="grid-overlay"></div>
+        <div class="investor-header anim-fade-up d1">
+            <h2>Step 1–3 in the product: type the idea, get the basket.</h2>
+        </div>
+        <div class="proof-frame anim-scale-in d2">
+            <figure class="proof-screen proof-screen--app neptor-product-frame">
+                <div class="neptor-product-chrome">
+                    <div class="neptor-product-chrome__dots"><span></span><span></span><span></span></div>
+                    <span class="neptor-product-chrome__title">Compose</span>
+                    <span class="neptor-product-chrome__spacer" aria-hidden="true"></span>
+                </div>
+                <img src="ss-compose.png" alt="SuperView compose and research workflow">
+            </figure>
+            <div class="proof-copy">
+                <span class="proof-copy-kicker">In the product</span>
+                <strong>Start with a sentence, not a ticker list.</strong>
+                <p>Example: “the world will need more electricity.” SuperView researches companies that actually trade as Stock Tokens on Robinhood Chain and returns a sized basket.</p>
+                <div class="proof-bullets">
+                    <span>Only eligible onchain names — no invented tickers</span>
+                    <span>If the universe is too thin, research stops</span>
+                    <span>A critic can send the basket back before publish</span>
+                </div>
+                <div class="proof-investor-note">
+                    <b>Who decides</b>
+                    <p>AI proposes. Portfolio rules approve.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 7. FEED -->
+    <section class="slide investor-slide investor-proof investor-proof-split">
+        <div class="grid-overlay"></div>
+        <div class="investor-header anim-fade-up d1">
+            <h2>Step 4: ideas live on a public investing feed.</h2>
+        </div>
+        <div class="proof-frame anim-scale-in d2">
+            <figure class="proof-screen proof-screen--app neptor-product-frame">
+                <div class="neptor-product-chrome">
+                    <div class="neptor-product-chrome__dots"><span></span><span></span><span></span></div>
+                    <span class="neptor-product-chrome__title">Feed</span>
+                    <span class="neptor-product-chrome__spacer" aria-hidden="true"></span>
+                </div>
+                <img src="ss-feed.png" alt="SuperView social feed of researched views">
+            </figure>
+            <div class="proof-copy">
+                <span class="proof-copy-kicker">In the product</span>
+                <strong>Each post is a full portfolio, not a hot take.</strong>
+                <p>You see the thesis, holdings, live mark, comments, and an invest action in one place. That is what makes SuperView feel social and serious at the same time.</p>
+                <div class="proof-bullets">
+                    <span>Performance sits on the post</span>
+                    <span>Copy a view and make your own version</span>
+                    <span>Follow the idea, not only the person</span>
+                </div>
+                <div class="proof-investor-note">
+                    <b>Why judges care</b>
+                    <p>Distribution is built in. Every good view can become content and capital.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 8. VS S&P -->
+    <section class="slide investor-slide investor-proof investor-proof-split">
+        <div class="grid-overlay"></div>
+        <div class="investor-header anim-fade-up d1">
+            <h2>Step 5: every idea gets scored against the S&amp;P 500.</h2>
+        </div>
+        <div class="proof-frame anim-scale-in d2">
+            <figure class="proof-screen proof-screen--app neptor-product-frame">
+                <div class="neptor-product-chrome">
+                    <div class="neptor-product-chrome__dots"><span></span><span></span><span></span></div>
+                    <span class="neptor-product-chrome__title">Take · vs S&amp;P 500</span>
+                    <span class="neptor-product-chrome__spacer" aria-hidden="true"></span>
+                </div>
+                <img src="ss-take.png" alt="SuperView view measured against the S&P 500">
+            </figure>
+            <div class="proof-copy">
+                <span class="proof-copy-kicker">In the product</span>
+                <strong>Was the belief right? The chart answers.</strong>
+                <p>From publish, SuperView tracks the basket against the S&amp;P with live Robinhood prices. The original sentence stays attached to the result.</p>
+                <div class="proof-bullets">
+                    <span>Prices refresh from Robinhood</span>
+                    <span>Thesis and result stay together</span>
+                    <span>Receipt locks what was published</span>
+                </div>
+                <div class="proof-investor-note">
+                    <b>Trust moment</b>
+                    <p>Proof sits next to the idea — not in a spreadsheet later.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 9. PAPER -->
+    <section class="slide investor-slide investor-proof investor-proof-split investor-proof-wallcard">
+        <div class="grid-overlay"></div>
+        <div class="investor-header investor-header--center anim-fade-up d1">
+            <h2>Step 6: try it with paper money <span class="team-accent">first</span></h2>
+            <p class="wallcard-headline-subline">Real prices. Simulated cash. Live trading stays behind a flag.</p>
+        </div>
+        <div class="proof-frame anim-scale-in d2">
+            <figure class="proof-screen proof-screen--app neptor-product-frame">
+                <div class="neptor-product-chrome">
+                    <div class="neptor-product-chrome__dots"><span></span><span></span><span></span></div>
+                    <span class="neptor-product-chrome__title">Paper portfolio</span>
+                    <span class="neptor-product-chrome__spacer" aria-hidden="true"></span>
+                </div>
+                <img src="ss-portfolio.png" alt="SuperView paper portfolio with live marks">
+            </figure>
+            <div class="proof-copy">
+                <span class="proof-copy-kicker">In the product</span>
+                <strong>Practice on live markets without live money.</strong>
+                <p>SuperView keeps a real double-entry paper ledger. Fills use live asks. You can see how the idea behaves before anyone spends USDG.</p>
+                <div class="proof-bullets">
+                    <span>Ledger records buys and cash moves</span>
+                    <span>Halts and bad prices get skipped</span>
+                    <span>Real-money path exists but stays off by default</span>
+                </div>
+                <div class="proof-investor-note">
+                    <b>Demo path</b>
+                    <p>Sentence → basket → paper fill → tick vs S&amp;P.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 10. WHAT'S REAL -->
+    <section class="slide investor-slide investor-traction">
+        <div class="grid-overlay"></div>
+        <div class="investor-header investor-header--center anim-fade-up d1">
+            <h2>What is real today — not a <span class="team-accent">slideware story.</span></h2>
+            <p class="traction-subline">Built against live Robinhood Chain data. Judges can poke the rails.</p>
+        </div>
+        <div class="build-proof-board anim-scale-in d2">
+            <article class="build-proof-col build-proof-col--build">
+                <span class="build-proof-kicker">Working loop</span>
+                <strong>Belief to paper fill</strong>
+                <p>The path we demo end to end.</p>
+                <ul>
+                    <li>Write a view and run research</li>
+                    <li>Publish a constrained basket</li>
+                    <li>Invest with paper cash at live marks</li>
+                </ul>
+                <div class="build-proof-stamp">
+                    <b>Show this</b>
+                    <span>90-second paper demo</span>
+                </div>
+            </article>
+            <article class="build-proof-col build-proof-col--rails">
+                <span class="build-proof-kicker">Market rails</span>
+                <strong>Live Robinhood data</strong>
+                <p>We do not invent the catalog or the tape.</p>
+                <ul>
+                    <li>Live Stock Token catalog + quotes</li>
+                    <li>0x quotes · Chainlink checks</li>
+                    <li>Privy for login and wallets</li>
+                </ul>
+                <div class="build-proof-stamp">
+                    <b>Chain</b>
+                    <span>Robinhood Chain</span>
+                </div>
+            </article>
+            <article class="build-proof-col build-proof-col--proof">
+                <span class="build-proof-kicker">Agent depth</span>
+                <strong>Research with a critic</strong>
+                <p>More than one LLM call and a pretty UI.</p>
+                <ul>
+                    <li>Multi-stage research with checkpoints</li>
+                    <li>Portfolio caps enforced in code</li>
+                    <li>SHA-256 receipt on publish</li>
+                </ul>
+                <div class="build-proof-stamp">
+                    <b>Evidence</b>
+                    <span>Live prices · locked basket</span>
+                </div>
+            </article>
+        </div>
+        <p class="build-proof-next">Honest scope: paper is the hero path. Live money stays gated. Rebalance that writes fills is next, not the demo claim.</p>
+    </section>
+
+    <!-- 11. MARKET -->
+    <section class="slide investor-slide investor-market">
+        <div class="grid-overlay"></div>
+        <div class="investor-header investor-header--center anim-fade-up d1">
+            <h2>Why this market is open <span class="team-accent">now</span></h2>
+            <p class="market-scale-subline">People already buy packaged ideas as funds. Stock Tokens finally make personal baskets tradable onchain.</p>
+        </div>
+        <div class="market-scale-board anim-scale-in d2">
+            <article class="market-scale-col market-scale-col--lead">
+                <span class="market-scale-kicker">Global ETFs</span>
+                <b>$24T</b>
+                <strong>Packaged ideas already win</strong>
+                <p>Investors buy themes through funds every day. The habit exists. The format is slow and one-size-fits-all.</p>
+                <span class="market-scale-source">ETFGI, August 2026</span>
+            </article>
+            <article class="market-scale-col">
+                <span class="market-scale-kicker">Thematic ETFs</span>
+                <b>$624B</b>
+                <strong>Our wedge</strong>
+                <p>Idea-driven funds. SuperView makes that personal: your sentence, your basket, your scoreboard.</p>
+                <span class="market-scale-source">ETFGI, July 2026</span>
+            </article>
+            <article class="market-scale-col">
+                <span class="market-scale-kicker">Stock Tokens</span>
+                <b>2,000+</b>
+                <strong>Names we can hold</strong>
+                <p>Robinhood Chain gives us a real universe. SuperView only invests what that catalog can actually settle.</p>
+                <span class="market-scale-source">Robinhood, 2026</span>
+            </article>
+        </div>
+        <p class="build-proof-next">Timing: agents got good enough to research. Stock Tokens got real enough to hold. Social proof still has no portfolio attached.</p>
+    </section>
+
+    <!-- 12. COMPETITIVE -->
+    <section class="slide investor-slide investor-competitive">
+        <div class="grid-overlay"></div>
+        <div class="investor-header anim-fade-up d1">
+            <h2>Existing tools cover pieces. <span class="team-accent">Nobody owns the full loop.</span></h2>
+            <p class="competitive-subline">Chat gives names. Brokers execute tickers. FinTwit spreads opinions. Thematic ETFs freeze a narrative for months.</p>
+        </div>
+        <div class="sv-compare-table anim-scale-in d2">
+            <div class="sv-compare-row sv-compare-row--head">
+                <span></span>
+                <span>Chat / FinTwit</span>
+                <span>Broker</span>
+                <span>Thematic ETF</span>
+                <span class="sv-compare-us">SuperView</span>
+            </div>
+            <div class="sv-compare-row">
+                <span>Starts from a belief</span>
+                <span>Maybe</span>
+                <span>No</span>
+                <span>Static theme</span>
+                <strong>Yes</strong>
+            </div>
+            <div class="sv-compare-row">
+                <span>Researches a basket</span>
+                <span>Loose list</span>
+                <span>You do it</span>
+                <span>Fund manager</span>
+                <strong>Agent + rules</strong>
+            </div>
+            <div class="sv-compare-row">
+                <span>Hard risk caps</span>
+                <span>No</span>
+                <span>Manual</span>
+                <span>Fund rules</span>
+                <strong>In code</strong>
+            </div>
+            <div class="sv-compare-row">
+                <span>Live vs S&amp;P on the idea</span>
+                <span>No</span>
+                <span>Account-level</span>
+                <span>Fund page</span>
+                <strong>On every post</strong>
+            </div>
+            <div class="sv-compare-row">
+                <span>Social + invest together</span>
+                <span>Social only</span>
+                <span>Invest only</span>
+                <span>Neither</span>
+                <strong>Both</strong>
+            </div>
+            <div class="sv-compare-row">
+                <span>Onchain Stock Tokens</span>
+                <span>No</span>
+                <span>Rarely</span>
+                <span>No</span>
+                <strong>Native</strong>
+            </div>
+        </div>
+    </section>
+
+    <!-- 13. WHAT'S NEXT -->
+    <section class="slide investor-slide investor-market-stages">
+        <div class="grid-overlay"></div>
+        <div class="investor-header investor-header--center anim-fade-up d1">
+            <h2>What we ship next — and the <span class="team-accent">ask.</span></h2>
+            <p class="market-stages-subline">Win the paper loop first. Then let the agent act. Then open live carefully.</p>
+        </div>
+        <div class="expansion-board anim-scale-in d2">
+            <article class="expansion-card expansion-card--lead">
+                <div class="expansion-top">
+                    <span class="expansion-kicker">Now</span>
+                    <span class="expansion-step">01</span>
+                </div>
+                <strong>Seeded paper proof</strong>
+                <p>Publish views with history so a cold demo never opens empty.</p>
+            </article>
+            <article class="expansion-card">
+                <div class="expansion-top">
+                    <span class="expansion-kicker">Next</span>
+                    <span class="expansion-step">02</span>
+                </div>
+                <strong>Agent that acts</strong>
+                <p>Rebalance should write a new target and paper fills, not only a note.</p>
+            </article>
+            <article class="expansion-card">
+                <div class="expansion-top">
+                    <span class="expansion-kicker">Then</span>
+                    <span class="expansion-step">03</span>
+                </div>
+                <strong>Private beta</strong>
+                <p>Eligible users create, follow, and fund views for real retention signal.</p>
+            </article>
+            <article class="expansion-card">
+                <div class="expansion-top">
+                    <span class="expansion-kicker">Later</span>
+                    <span class="expansion-step">04</span>
+                </div>
+                <strong>Small live trades</strong>
+                <p>Turn on USDG with tight caps once the paper book is trusted.</p>
+            </article>
+            <article class="expansion-card">
+                <div class="expansion-top">
+                    <span class="expansion-kicker">Raise</span>
+                    <span class="expansion-step">05</span>
+                </div>
+                <strong>$500K pre-seed</strong>
+                <p>Product + agent, market rails, and a controlled beta — not vanity features.</p>
+            </article>
+        </div>
+        <p class="build-proof-next">Judge takeaway: the paper path works today. Capital makes the agent finish the job and puts users on it.</p>
+    </section>
+
+    <!-- 14. TEAM -->
+    <section class="slide investor-slide investor-team">
+        <div class="grid-overlay"></div>
+        <div class="investor-header anim-fade-up d1">
+            <h2>Team that can ship <span class="team-accent">agents + money rails</span></h2>
+        </div>
+        <div class="team-strip-board anim-scale-in d2">
+            <article class="team-strip-card">
+                <img class="team-strip-avatar" src="mohit.jpg" alt="Mohit Bhat">
+                <div class="team-strip-copy">
+                    <h3>Mohit Bhat</h3>
+                    <strong>Co-builder · Web3 + systems</strong>
+                    <p>Web3 infrastructure across 15+ networks. Ex Fleek Network, Ex Singularity, Ex Accubits. 60+ hackathon wins, ETHGlobal finalist 4x, GSoC, Summer of Bitcoin, Ethereum India Fellow.</p>
+                    <div class="team-chip-row">
+                        <span class="team-chip"><span class="team-chip__icon">🏢</span>Ex Fleek Network</span>
+                        <span class="team-chip"><span class="team-chip__icon">🏢</span>Ex Singularity · Founding Lead</span>
+                        <span class="team-chip"><span class="team-chip__icon">🏆</span>60+ hackathon wins · 15+ countries</span>
+                        <span class="team-chip"><span class="team-chip__icon">🌐</span>ETHGlobal finalist 4x</span>
+                        <span class="team-chip"><span class="team-chip__icon">📚</span>GSoC · Summer of Bitcoin</span>
+                    </div>
+                </div>
+            </article>
+            <article class="team-strip-card">
+                <img class="team-strip-avatar" src="jatin.jpg" alt="Jatin Gupta">
+                <div class="team-strip-copy">
+                    <h3>Jatin Gupta</h3>
+                    <strong>Co-builder · Backend + fintech</strong>
+                    <p>Owns collections systems at Paisabazaar Payments. Experience across payments, cloud infra, decentralized AI compute, and high-scale APIs.</p>
+                    <div class="team-chip-row">
+                        <span class="team-chip"><span class="team-chip__icon">🏢</span>Paisabazaar · Payments &amp; Collections</span>
+                        <span class="team-chip"><span class="team-chip__icon">💰</span>Rs 100Cr+ monthly collections</span>
+                        <span class="team-chip"><span class="team-chip__icon">🏢</span>Ex Planck Network</span>
+                        <span class="team-chip"><span class="team-chip__icon">☁️</span>Ex Elucidata · AWS + APIs</span>
+                        <span class="team-chip"><span class="team-chip__icon">⚙️</span>Terraform → Terragrunt · 80% less infra effort</span>
+                    </div>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <!-- 15. CLOSE -->
+    <section class="slide investor-slide investor-close">
+        <div class="grid-overlay"></div>
+        <div class="close-panel anim-scale-in d1">
+            <span class="close-kicker">SuperView · Robinhood Chain</span>
+            <p class="close-statement">
+                <span>Write the belief.</span>
+                <span>We build the book.</span>
+                <span>The S&amp;P keeps score.</span>
+                <strong class="close-cta">That is SuperView.</strong>
+            </p>
+        </div>
+        <div class="close-contact-row anim-fade-up d2">
+            <a href="https://github.com/mbcse/superview" class="close-contact-pill" target="_blank" rel="noopener noreferrer">github.com/mbcse/superview</a>
+            <span class="close-contact-pill">Paper-first</span>
+            <span class="close-contact-pill">Live Robinhood marks</span>
+            <a href="mailto:hello@superview.app" class="close-contact-pill">hello@superview.app</a>
+        </div>
+    </section>
+
+</div>
+
+<div class="progress-bar">
+    <div class="progress-fill"></div>
+</div>
+
+<button class="nav-arrow prev" disabled>&lsaquo;</button>
+<button class="nav-arrow next">&rsaquo;</button>
+
+<div class="slide-dots"></div>
+
+<div class="slide-counter" hidden aria-hidden="true">
+    <span class="current-num">1</span> / <span class="total-num">15</span>
+</div>
+
+<div class="keyboard-hint">
+    <span class="key-badge">&larr;&rarr;</span>
+    <span class="key-badge">Space</span>
+    <span class="key-badge">F</span>
+</div>
+
+<button class="fullscreen-btn" title="Fullscreen (F)">⛶</button>
+<button class="export-btn" title="Export PDF" onclick="exportToPDF()">PDF</button>
+
+<script src="slides.js"></script>
+<script>
+function flattenPdfGradientText(root) {
+    root.querySelectorAll('*').forEach(el => {
+        const cs = window.getComputedStyle(el);
+        if (cs.webkitBackgroundClip !== 'text' && cs.backgroundClip !== 'text') return;
+        el.style.background = 'none';
+        el.style.backgroundImage = 'none';
+        el.style.webkitBackgroundClip = 'unset';
+        el.style.backgroundClip = 'unset';
+        el.style.webkitTextFillColor = 'unset';
+        if (el.classList.contains('hero-accent')) {
+            el.style.color = '#FF9500';
+        } else if (el.classList.contains('rev-highlight')) {
+            el.style.color = '#FF3B30';
+        } else {
+            el.style.color = '#ffffff';
+        }
+    });
+}
+
+function preparePdfSlideClone(clone, vw, vh) {
+    const isHero = clone.classList.contains('investor-hero');
+    const isClose = clone.classList.contains('investor-close');
+
+    clone.style.cssText = [
+        'position:relative',
+        'box-sizing:border-box',
+        'width:' + vw + 'px',
+        'height:' + vh + 'px',
+        'min-height:' + vh + 'px',
+        'max-height:' + vh + 'px',
+        'opacity:1',
+        'transform:none',
+        'pointer-events:none',
+        'display:flex',
+        'flex-direction:column',
+        'overflow:hidden',
+        'justify-content:center',
+        'align-items:' + (isHero || isClose ? 'center' : 'stretch'),
+        'text-align:' + (isHero || isClose ? 'center' : 'left'),
+        'padding:clamp(2.75rem, 4.5vh, 3.5rem) 4rem',
+    ].join('; ') + ';';
+
+    clone.querySelectorAll('.anim-fade-up, .anim-scale-in, [class*="anim-"], .flow-step, .flow-arrow, .sv-flow-step, .sv-flow-arrow').forEach(el => {
+        el.style.opacity = '1';
+        el.style.transform = 'none';
+        el.style.animation = 'none';
+    });
+
+    flattenPdfGradientText(clone);
+}
+
+async function exportToPDF() {
+    const btn = document.querySelector('.export-btn');
+    const origText = btn.innerHTML;
+    btn.innerHTML = 'Exporting...';
+    btn.disabled = true;
+
+    await new Promise(r => setTimeout(r, 100));
+
+    let attempts = 0;
+    while (!window.jspdf && attempts < 50) {
+        await new Promise(r => setTimeout(r, 200));
+        attempts++;
+    }
+    if (!window.jspdf || !window.html2canvas) {
+        alert('PDF libraries failed to load. Please check your internet connection and try again.');
+        btn.innerHTML = origText;
+        btn.disabled = false;
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const slides = document.querySelectorAll('.slide:not(.slide-hidden)');
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'px',
+        format: [vw, vh],
+        hotfixes: ['px_scaling']
+    });
+
+    const offscreen = document.createElement('div');
+    offscreen.id = 'pdf-render';
+    offscreen.style.cssText = 'position:fixed; top:0; left:0; width:' + vw + 'px; height:' + vh + 'px; z-index:99999; overflow:hidden; background:#0A0A0A;';
+    document.body.appendChild(offscreen);
+
+    const scopeStyle = document.createElement('style');
+    scopeStyle.textContent = [
+        '#pdf-render, #pdf-render .slide { position:relative !important; opacity:1 !important; transform:none !important; pointer-events:none !important; }',
+        '#pdf-render .slide::before, #pdf-render .slide::after { display:none !important; }',
+        '#pdf-render .anim-fade-up, #pdf-render .anim-scale-in, #pdf-render [class*="anim-"] { opacity:1 !important; transform:none !important; animation:none !important; }',
+        '#pdf-render .hero-accent { background:none !important; -webkit-background-clip:unset !important; background-clip:unset !important; -webkit-text-fill-color:#FF9500 !important; color:#FF9500 !important; }',
+        '#pdf-render .investor-hero, #pdf-render .investor-close, #pdf-render .investor-slide { justify-content:center !important; }',
+        '#pdf-render .investor-hero, #pdf-render .investor-close { align-items:center !important; text-align:center !important; }',
+        '#pdf-render .investor-close .close-panel, #pdf-render .investor-close .close-contact-row, #pdf-render .investor-close .close-founder-line { width:100% !important; max-width:min(1040px, 100%) !important; margin-left:auto !important; margin-right:auto !important; }',
+    ].join(' ');
+    document.head.appendChild(scopeStyle);
+
+    for (let i = 0; i < slides.length; i++) {
+        btn.innerHTML = (i + 1) + '/' + slides.length;
+        const clone = slides[i].cloneNode(true);
+        clone.classList.add('active');
+        clone.classList.remove('exit-left', 'exit-right');
+        preparePdfSlideClone(clone, vw, vh);
+
+        offscreen.innerHTML = '';
+        offscreen.appendChild(clone);
+
+        const imgs = clone.querySelectorAll('img');
+        await Promise.all(Array.from(imgs).map(img => {
+            if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+            return new Promise(res => {
+                img.onload = res;
+                img.onerror = res;
+                setTimeout(res, 2000);
+            });
+        }));
+
+        await new Promise(r => setTimeout(r, 200));
+        flattenPdfGradientText(clone);
+        const cvs = await html2canvas(clone, {
+            backgroundColor: '#0A0A0A',
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            logging: false,
+            width: vw,
+            height: vh,
+            scrollX: 0,
+            scrollY: 0,
+            windowWidth: vw,
+            windowHeight: vh
+        });
+
+        const imgData = cvs.toDataURL('image/jpeg', 0.92);
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, 0, vw, vh);
+    }
+
+    document.head.removeChild(scopeStyle);
+    document.body.removeChild(offscreen);
+    if (window.posthog) posthog.capture('pdf_exported', { deck: 'SuperView Pitch Deck', slide_count: slides.length });
+    pdf.save('SuperView-Pitch-Deck.pdf');
+    btn.innerHTML = origText;
+    btn.disabled = false;
+}
+</script>
+
+</body>
+</html>

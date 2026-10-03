@@ -43,7 +43,7 @@ export function DemoAuthProvider({ children }: { children: ReactNode }) {
     () => ({
       ready,
       authenticated: Boolean(demo),
-      displayName: demo ?? "Guest",
+      displayName: demo ? "Maya Chen" : "Guest",
       handle: demo ?? "guest",
       walletAddress: null,
       login,
