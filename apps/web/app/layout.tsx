@@ -1,8 +1,18 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { Providers } from "../components/providers";
 import "./globals.css";
+
+const saans = localFont({
+  src: "../fonts/SaansUprightsVF.woff2",
+  variable: "--font-saans",
+  display: "swap",
+  weight: "300 800",
+  fallback: ["system-ui", "sans-serif"],
+  adjustFontFallback: "Arial"
+});
 
 export const metadata: Metadata = {
   title: "SuperView",
@@ -17,7 +27,7 @@ export const viewport: Viewport = { themeColor: "#F7FAFB" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
+    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable} ${saans.variable}`}>
       <body className="font-sans">
         <a className="skip" href="#main">
           Skip to content

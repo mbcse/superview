@@ -16,10 +16,10 @@ export function formatErr(err: unknown): string {
   if (!err) return "unknown";
   if (typeof err === "string") return clip(err, 220);
   if (err instanceof Error) {
-    const extra = err as Error & { data?: { error?: { message?: string } }; cause?: unknown };
+    const extra = err as Error & { shortMessage?: string; data?: { error?: { message?: string } }; cause?: unknown };
     const nested = extra.data?.error?.message;
-    const cause = extra.cause instanceof Error ? extra.cause.message : undefined;
-    const joined = [extra.message, nested, cause].filter((p, i, a) => p && a.indexOf(p) === i).join(" · ");
+    const cause = extra.cause instanceof Error ? extra.cause.message : extra.shortMessage;
+    const joined = [extra.shortMessage ?? extra.message, nested, cause].filter((p, i, a) => p && a.indexOf(p) === i).join(" · ");
     const arg = joined.match(/Argument `[^`]+`[^]*?(?:Expected [^.]+\.|invalid\.)/i);
     const useful = arg ? arg[0] : joined;
     return clip(useful.replace(/Value: \{[\s\S]*\}$/, "schema mismatch").replace(/\s+/g, " "), 220);

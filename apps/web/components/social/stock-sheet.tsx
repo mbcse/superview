@@ -53,6 +53,7 @@ type TokenCard = {
   logoUrl?: string | null;
   about?: string | null;
   filling?: boolean;
+  actions?: Array<{ type?: string; status?: string; processDate?: string | null }>;
 };
 
 function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: StockMeta; onClose: () => void }) {
@@ -199,6 +200,19 @@ function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: St
               <div className="mt-6">
                 <p className="text-[11px] uppercase tracking-[0.08em] text-muted">Why in the basket</p>
                 <p className="mt-2 text-[15px] leading-relaxed text-ink">{why}</p>
+              </div>
+            ) : null}
+            {card?.actions?.length ? (
+              <div className="mt-6">
+                <p className="text-[11px] uppercase tracking-[0.08em] text-muted">Corporate actions</p>
+                <ul className="mt-2 space-y-1 text-[13px] text-muted">
+                  {card.actions.map((a, i) => (
+                    <li key={`${a.type}-${i}`}>
+                      {a.type ?? "Action"} · {a.status ?? "open"}
+                      {a.processDate ? ` · ${new Date(a.processDate).toLocaleDateString()}` : ""}
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
             <p className="mt-6 text-[13px] leading-relaxed text-muted">

@@ -6,10 +6,11 @@ import {
   feedAnswerToUsd,
   readAggregator
 } from "@takeandstake/chain";
+import { log, logError } from "@takeandstake/shared";
 import { ingestRobinhoodPrices, latestPrices, liveQuoteForToken, type LiveQuote } from "../market/prices.js";
 import { backingPrivacy } from "../social/backing.js";
 import { asNum, asSharePrice, unitsToQty, weightedBookIndex, type HoldingContribution } from "./mark.js";
-import { buildTakeSeries } from "./series.js";
+import { buildTakeSeries, rangeSince } from "./series.js";
 
 export const KNOWN_CHAINLINK_FEEDS: Record<string, `0x${string}`> = {
   RHNVDA: RHNVDA_FEED,
@@ -31,16 +32,17 @@ export async function attachKnownFeeds() {
   }
 }
 
-export async function ingestChainlinkSnapshots(rpcUrl: string) {
-  if (!rpcUrl) return { written: 0 };
+export async function ingestChainlinkSnapshots(rpcUrl?: string) {
   await attachKnownFeeds();
   const tokens = await prisma.stockToken.findMany({ where: { feedAddress: { not: null } } });
   const client = createRhClient(rpcUrl);
   let written = 0;
+  let fails = 0;
   for (const t of tokens) {
     if (!t.feedAddress) continue;
     try {
       const read = await readAggregator(client, t.feedAddress as `0x${string}`, t.heartbeat);
+      fails = 0;
       if (read.stale) continue;
       await prisma.priceSnapshot.create({
         data: {
@@ -53,7 +55,12 @@ export async function ingestChainlinkSnapshots(rpcUrl: string) {
       });
       written += 1;
     } catch (err) {
-      console.error("chainlink", t.symbol, err);
+      fails += 1;
+      if (fails === 1) logError("chain", "chainlink", err, { symbol: t.symbol });
+      if (fails >= 3) {
+        log("chain", "chainlink skip", { remaining: tokens.length - written });
+        break;
+      }
     }
   }
   return { written };
@@ -280,9 +287,9 @@ export async function markPockets() {
   return { marked: n };
 }
 
-export async function tickMarket(rpcUrl: string) {
+export async function tickMarket(rpcUrl?: string) {
   const rh = await ingestRobinhoodPrices().catch((e) => {
-    console.error("rh prices", e);
+    logError("chain", "rh prices", e);
     return { written: 0, payload: [], at: new Date().toISOString() };
   });
   const prices = await ingestChainlinkSnapshots(rpcUrl);
@@ -291,15 +298,7 @@ export async function tickMarket(rpcUrl: string) {
   return { rh, prices, books, pockets, at: new Date().toISOString() };
 }
 
-export function rangeSince(tab: string): Date | undefined {
-  const now = Date.now();
-  if (tab === "1D") return new Date(now - 24 * 60 * 60 * 1000);
-  if (tab === "1W") return new Date(now - 7 * 24 * 60 * 60 * 1000);
-  if (tab === "1M") return new Date(now - 30 * 24 * 60 * 60 * 1000);
-  if (tab === "YTD") return new Date(new Date().getFullYear(), 0, 1);
-  if (tab === "1Y") return new Date(now - 365 * 24 * 60 * 60 * 1000);
-  return undefined;
-}
+export { rangeSince };
 
 export async function takeSeries(takeId: string, range = "1D") {
   const since = rangeSince(range);
@@ -375,7 +374,7 @@ export function serializeFeedTake(t: {
   const indexValue = asNum(val?.indexValue);
   const benchmarkIndex = asNum(val?.benchmarkIndex);
   const vsSpy = indexValue != null && benchmarkIndex != null ? indexValue - benchmarkIndex : null;
-  const contrib = (val?.holdingContributions as HoldingContribution[] | null) ?? [];
+  const contrib = Array.isArray(val?.holdingContributions) ? (val.holdingContributions as HoldingContribution[]) : [];
   const spyContrib = contrib.find((c) => {
     const s = String(c.symbol ?? "").toUpperCase();
     return s === "RHSPY" || s === "SPY";

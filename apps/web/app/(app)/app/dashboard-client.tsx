@@ -167,7 +167,7 @@ export default function DashboardClient({ initial }: { initial: TakeRow[] }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[13px] text-mint">vs S&P 500</p>
-            <h2 className="mt-2 text-[20px] font-semibold leading-snug tracking-[-0.02em] md:text-[24px]">{featured?.sentence}</h2>
+            <h2 className="view mt-2 text-[20px] font-medium leading-snug tracking-[-0.02em] md:text-[24px]">{featured?.sentence}</h2>
             <p className="mt-2 text-[14px] text-white/70">{agentByTake[featured?.id ?? ""] ?? "Checked today. No change."}</p>
             <p className="num mt-3 text-[28px] font-semibold text-lime">
               <TickValue value={vs} format={(n) => fmtVsLabel(n, 2)} color="sign" className="text-[28px] font-semibold text-lime" />

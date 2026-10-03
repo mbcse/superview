@@ -58,6 +58,24 @@ export function downsampleSeries(rows: SeriesPoint[], bucketMs: number): SeriesP
   return [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([, p]) => p);
 }
 
+export function rangeSince(tab: string, now = Date.now()): Date | undefined {
+  if (tab === "1D") return new Date(now - 24 * 60 * 60 * 1000);
+  if (tab === "1W") return new Date(now - 7 * 24 * 60 * 60 * 1000);
+  if (tab === "1M") return new Date(now - 30 * 24 * 60 * 60 * 1000);
+  if (tab === "YTD") return new Date(new Date(now).getFullYear(), 0, 1);
+  if (tab === "1Y") return new Date(now - 365 * 24 * 60 * 60 * 1000);
+  return undefined;
+}
+
+export function windowExcessVsSpy(rows: MarkRow[], period: string, now = Date.now()): number | null {
+  const since = rangeSince(period, now);
+  const pts = dropUnitMixMarks(rows).filter((p) => !since || p.asOf.getTime() >= since.getTime());
+  if (pts.length < 2) return null;
+  const first = pts[0]!;
+  const last = pts[pts.length - 1]!;
+  return last.indexValue - first.indexValue - (last.benchmarkIndex - first.benchmarkIndex);
+}
+
 export function rangeSpanMs(range: string, now = Date.now()) {
   if (range === "1D") return 24 * 60 * 60 * 1000;
   if (range === "1W") return 7 * 24 * 60 * 60 * 1000;

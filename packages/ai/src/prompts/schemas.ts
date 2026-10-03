@@ -23,7 +23,7 @@ export const interpreterSchema = z.object({
       companyKinds: z.array(z.string()),
       searchPhrases: z.array(z.string())
     })
-  ),
+  ).default([]),
   refuse: z.boolean().default(false),
   refuseReason: z.string().optional()
 });

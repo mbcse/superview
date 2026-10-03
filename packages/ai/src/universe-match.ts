@@ -6,7 +6,7 @@ export type UniverseRow = {
   sector: string | null;
 };
 
-export function matchParallelNameToUniverse(name: string, universe: UniverseRow[]): UniverseRow | null {
+export function matchNameToUniverse(name: string, universe: UniverseRow[]): UniverseRow | null {
   const n = name.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
   for (const row of universe) {
     const legal = row.legalName.toLowerCase();

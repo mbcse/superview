@@ -32,8 +32,12 @@ export function InvestDialog({
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [liveOk, setLiveOk] = useState(false);
+  const [mode, setMode] = useState<"DRY_RUN" | "LIVE">("DRY_RUN");
+  const [orderId, setOrderId] = useState<string | null>(null);
   const usd = Number(amount);
   const valid = Number.isFinite(usd) && usd >= 1;
+  const live = mode === "LIVE";
 
   useEffect(() => {
     setDone(false);
@@ -41,7 +45,16 @@ export function InvestDialog({
     setError("");
     setAmount("250");
     setReveal(false);
+    setMode("DRY_RUN");
+    setOrderId(null);
   }, [takeId]);
+
+  useEffect(() => {
+    if (!takeId) return;
+    fetchApi<{ liveEnabled?: boolean; wallet?: { id?: string } }>("/v1/wallet")
+      .then((d) => setLiveOk(Boolean(d.liveEnabled && d.wallet)))
+      .catch(() => setLiveOk(false));
+  }, [takeId, fetchApi]);
 
   useEffect(() => {
     if (!takeId) return;
@@ -57,17 +70,26 @@ export function InvestDialog({
     setBusy(true);
     setError("");
     try {
-      const r = await fetchApi<{ pocket?: { id: string }; invest?: { fills?: number } }>(`/v1/takes/${takeId}/back`, {
-        method: "POST",
-        body: JSON.stringify({ level: "DRY_RUN", mandateMode: "AUTO", amountUsd: usd, revealAmount: reveal })
-      });
-      if (r.pocket?.id && !r.invest?.fills) {
-        await fetchApi(`/v1/pockets/${r.pocket.id}/dry-run-invest`, { method: "POST" });
+      const r = await fetchApi<{ pocket?: { id: string }; invest?: { fills?: number; orderId?: string } }>(
+        `/v1/takes/${takeId}/back`,
+        {
+          method: "POST",
+          body: JSON.stringify({ level: mode, mandateMode: "AUTO", amountUsd: usd, revealAmount: reveal })
+        }
+      );
+      let filled = r.invest;
+      if (r.pocket?.id && !filled?.fills) {
+        filled = await fetchApi<{ fills?: number; orderId?: string }>(
+          live ? `/v1/pockets/${r.pocket.id}/live-invest` : `/v1/pockets/${r.pocket.id}/dry-run-invest`,
+          { method: "POST", body: JSON.stringify({ amountUsd: usd }) }
+        );
       }
+      setOrderId(filled?.orderId ?? null);
       setDone(true);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setError("Sign in to invest.");
-      else setError("Couldn’t put paper money on this view.");
+      else if (e instanceof ApiError && e.status === 403) setError("Live USDG is off. Use paper.");
+      else setError(live ? "Couldn’t spend USDG on this view." : "Couldn’t put paper money on this view.");
     }
     setBusy(false);
   }
@@ -121,12 +143,13 @@ export function InvestDialog({
                   You’re invested
                 </h2>
                 <p className="mt-2 text-[15px] text-muted">
-                  <span className="font-mono text-ink">{formatMoney(usd)}</span> of paper money is now tracking
+                  <span className="font-mono text-ink">{formatMoney(usd)}</span>{" "}
+                  {live ? "of USDG is now tracking" : "of paper money is now tracking"}
                 </p>
                 <p className="mt-4 text-[16px] font-medium leading-snug text-ink">“{sentence ?? "View"}”</p>
                 <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[12px] font-medium text-ink">
                   <span className="h-1.5 w-1.5 rounded-full bg-teal" />
-                  Paper · no real money
+                  {live ? "Live USDG" : "Paper · no real money"}
                 </span>
                 <Button
                   className="mt-8"
@@ -134,12 +157,12 @@ export function InvestDialog({
                   variant="primary"
                   fullWidth
                   onClick={() => {
-                    const id = takeId;
+                    const dest = orderId ? `/app/order/${orderId}` : takeId ? `/app/takes/${takeId}` : "/app/pockets";
                     onClose();
-                    if (id) router.push(`/app/takes/${id}`);
+                    router.push(dest);
                   }}
                 >
-                  See this view
+                  {orderId ? "See order" : "See this view"}
                 </Button>
               </div>
             ) : (
@@ -153,10 +176,29 @@ export function InvestDialog({
                   Invest in this view
                 </h2>
                 <p className="mt-3 pr-8 text-[16px] font-medium leading-snug text-ink">“{sentence ?? "View"}”</p>
-                <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[12px] font-medium text-ink">
-                  <span className="h-1.5 w-1.5 rounded-full bg-teal" />
-                  Paper · no real money
-                </span>
+                {liveOk ? (
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMode("DRY_RUN")}
+                      className={`h-8 rounded-full px-3 text-[12px] ${mode === "DRY_RUN" ? "bg-mist text-ink" : "text-muted"}`}
+                    >
+                      Paper
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMode("LIVE")}
+                      className={`h-8 rounded-full px-3 text-[12px] ${live ? "bg-mist text-ink" : "text-muted"}`}
+                    >
+                      Live USDG
+                    </button>
+                  </div>
+                ) : (
+                  <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[12px] font-medium text-ink">
+                    <span className="h-1.5 w-1.5 rounded-full bg-teal" />
+                    Paper · no real money
+                  </span>
+                )}
                 <label htmlFor="invest-amount" className="mt-8 block text-[13px] text-muted">
                   Amount
                 </label>
@@ -187,7 +229,9 @@ export function InvestDialog({
                   ))}
                 </div>
                 <p className="mt-8 text-[13px] leading-relaxed text-muted">
-                  Paper uses live marks without live money. Stock tokens are economic exposure, not share ownership.
+                  {live
+                    ? "This spends real USDG from your Privy wallet after you confirm. Stock tokens are economic exposure, not share ownership."
+                    : "Paper uses live marks without live money. Stock tokens are economic exposure, not share ownership."}
                 </p>
                 <label className="mt-4 flex items-start gap-3 text-[13px] text-ink">
                   <input

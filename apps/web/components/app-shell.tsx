@@ -105,7 +105,7 @@ function ShellHeader() {
           onSubmit={(e) => {
             e.preventDefault();
             void setQ(search.trim());
-            router.push("/app/trending");
+            router.push(`/app?q=${encodeURIComponent(search.trim())}`);
           }}
         >
           <label htmlFor="global-search" className="sr-only">
@@ -221,7 +221,7 @@ function PulseViewRow({ item, rank }: { item: FeedTake; rank: number }) {
       >
         <span className="figure w-7 shrink-0 text-[18px] text-teal">{pad2(rank + 1)}</span>
         <span className="min-w-0">
-          <span className="line-clamp-2 text-[13px] text-ink">{item.sentence ?? "View"}</span>
+          <span className="view line-clamp-2 text-[13px] font-medium text-ink">{item.sentence ?? "View"}</span>
           <TickValue value={vs} format={(n) => fmtVsLabel(n, 2)} color="sign" className="mt-1 block font-mono text-[11px]" />
         </span>
       </Link>

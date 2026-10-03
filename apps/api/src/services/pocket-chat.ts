@@ -1,7 +1,7 @@
 import { prisma } from "@takeandstake/db";
 import { instructPocket } from "@takeandstake/ai";
 import type { Env } from "@takeandstake/config";
-import { depositPaperUsd, runDryRunInvest } from "./paper-invest.js";
+import { depositPaperUsd, executePaperRebalance, runDryRunInvest, weightsFromTrimAdd } from "./paper-invest.js";
 
 export async function handlePocketChat(pocketId: string, userId: string, body: string, env: Env) {
   const userMsg = await prisma.pocketChat.create({
@@ -39,31 +39,42 @@ export async function handlePocketChat(pocketId: string, userId: string, body: s
     reply = parsed.reply || "I’ll rebalance this pocket as the story changes.";
   } else if ((parsed.intent === "trim" || parsed.intent === "add_name") && parsed.symbol) {
     const symbol = parsed.symbol.replace(/^RH/, "").toUpperCase();
-    const holdings = pocket.take.revisions[0]?.target?.holdings ?? [];
-    const hit = holdings.find((h) => h.token.symbol.replace(/^RH/, "").toUpperCase() === symbol);
-    await prisma.rebalanceProposal.create({
+    const target = pocket.take.revisions[0]?.target;
+    const holdings = target?.holdings ?? [];
+    let addTokenId: string | undefined;
+    if (parsed.intent === "add_name") {
+      const token = await prisma.stockToken.findFirst({
+        where: { chainId: 4663, symbol: { in: [symbol, `RH${symbol}`] }, status: "ACTIVE" }
+      });
+      addTokenId = token?.id;
+    }
+    const next = weightsFromTrimAdd(holdings, target?.cashBps ?? 500, parsed.intent, symbol, addTokenId);
+    const proposal = await prisma.rebalanceProposal.create({
       data: {
         pocketId,
         trigger: "owner_chat",
-        trades: {
-          holdings: [
-            {
-              symbol: hit?.token.symbol ?? `RH${symbol}`,
-              action: parsed.intent === "trim" ? "decrease" : "add",
-              reason: body
-            }
-          ]
-        },
+        trades: { weights: next.weights, cashBps: next.cashBps, intent: parsed.intent, symbol },
         estCostUsd: 0,
-        status: "PENDING",
+        status: pocket.mandate?.mode === "APPROVAL" ? "PENDING" : "PENDING",
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
       }
     });
-    reply =
-      parsed.reply ||
-      (pocket.mandate?.mode === "APPROVAL"
-        ? `Proposed ${parsed.intent === "trim" ? "trim" : "add"} ${symbol}. Approve it below.`
-        : `Queued ${parsed.intent === "trim" ? "trim" : "add"} ${symbol}.`);
+    if (pocket.mandate?.mode !== "APPROVAL" && pocket.mode === "DRY_RUN") {
+      const exec = await executePaperRebalance(pocketId, env, next.weights, {
+        proposalId: proposal.id,
+        cashBps: next.cashBps,
+        changeSummary: `${parsed.intent === "trim" ? "Trim" : "Add"} ${symbol}`
+      });
+      reply =
+        parsed.reply ||
+        ("error" in exec
+          ? `Couldn’t rebalance ${symbol}.`
+          : `${parsed.intent === "trim" ? "Trimmed" : "Added"} ${symbol} and filled the paper book.`);
+    } else {
+      reply =
+        parsed.reply ||
+        `Proposed ${parsed.intent === "trim" ? "trim" : "add"} ${symbol}. Approve it below.`;
+    }
   }
 
   const agentMsg = await prisma.pocketChat.create({

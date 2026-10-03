@@ -2,12 +2,18 @@ import { Router } from "express";
 import { Queue } from "bullmq";
 import { prisma } from "@takeandstake/db";
 import { takeSentenceSchema, log } from "@takeandstake/shared";
+import { loadEnv } from "@takeandstake/config";
 import { requireAuth } from "../middleware/auth.js";
 import { createRedis, dropRedis, redis } from "../redis.js";
 import { portfolioFromRun, withDraftPayload } from "../services/portfolio-from-run.js";
 
 const researchQueue = new Queue("research", { connection: redis });
 const agentQueue = new Queue("agent", { connection: redis });
+const env = loadEnv();
+
+function isAdmin(req: { header: (n: string) => string | undefined }) {
+  return req.header("x-admin-token") === env.ADMIN_TOKEN;
+}
 
 export const researchRouter = Router();
 
@@ -23,14 +29,49 @@ researchRouter.post("/v1/research", requireAuth, async (req, res) => {
       origin: "AUTHOR"
     }
   });
+  const prior = await prisma.thesisSpec.findFirst({
+    where: { normalizedTake: { equals: parsed.data.sentence, mode: "insensitive" }, refuse: false },
+    include: { run: { include: { events: { orderBy: { createdAt: "desc" }, take: 8 } } } }
+  });
+  const reusable =
+    prior?.run && (prior.run.status === "DRAFT" || prior.run.status === "DEEP_DONE") ? prior.run : null;
   const run = await prisma.researchRun.create({
     data: {
       takeId: take.id,
-      status: "PENDING",
-      stage: "queued",
-      modelVersions: { view: parsed.data.sentence }
+      status: reusable ? "DRAFT" : "PENDING",
+      stage: reusable ? "draft" : "queued",
+      modelVersions: reusable?.modelVersions ?? { view: parsed.data.sentence },
+      finishedAt: reusable ? new Date() : undefined
     }
   });
+  if (reusable) {
+    const draft = reusable.events.find((e) => e.stage === "draft");
+    await prisma.researchEvent.create({
+      data: {
+        runId: run.id,
+        stage: "draft",
+        message: "Reused staged thesis",
+        payload: draft?.payload ?? null
+      }
+    });
+    if (!prior.refuse) {
+      await prisma.thesisSpec.create({
+        data: {
+          runId: run.id,
+          normalizedTake: prior.normalizedTake,
+          interpretation: prior.interpretation,
+          mechanism: prior.mechanism,
+          horizon: prior.horizon,
+          assumptions: prior.assumptions ?? undefined,
+          falsifiers: prior.falsifiers ?? undefined,
+          questions: prior.questions ?? undefined,
+          refuse: false
+        }
+      });
+    }
+    log("api", "research reused", { run: run.id, view: parsed.data.sentence });
+    return res.json({ takeId: take.id, runId: run.id, status: run.status, reused: true });
+  }
   await prisma.researchEvent.create({
     data: { runId: run.id, stage: "queued", message: "Queued for research" }
   });
@@ -49,11 +90,15 @@ researchRouter.get("/v1/research/:runId", requireAuth, async (req, res) => {
     include: {
       thesis: true,
       actions: true,
+      take: { select: { authorId: true } },
       events: { orderBy: { createdAt: "asc" } },
       candidates: { include: { score: true, token: true } }
     }
   });
   if (!run) return res.status(404).json({ error: "not_found" });
+  if (run.take && run.take.authorId !== req.user!.id && !isAdmin(req)) {
+    return res.status(403).json({ error: "forbidden" });
+  }
   const draft = [...run.events].reverse().find((e) => e.stage === "draft");
   const constructed = portfolioFromRun(withDraftPayload(run, draft?.payload));
   res.json({ run, portfolio: constructed, spec: run.thesis });
@@ -61,6 +106,14 @@ researchRouter.get("/v1/research/:runId", requireAuth, async (req, res) => {
 
 researchRouter.get("/v1/research/:runId/stream", requireAuth, async (req, res) => {
   const runId = String(req.params.runId);
+  const owned = await prisma.researchRun.findUnique({
+    where: { id: runId },
+    include: { take: { select: { authorId: true } } }
+  });
+  if (!owned) return res.status(404).json({ error: "not_found" });
+  if (owned.take && owned.take.authorId !== req.user!.id && !isAdmin(req)) {
+    return res.status(403).json({ error: "forbidden" });
+  }
   res.setHeader("content-type", "text/event-stream");
   res.setHeader("cache-control", "no-cache");
   res.setHeader("connection", "keep-alive");
@@ -97,11 +150,15 @@ researchRouter.post("/v1/research/:runId/draft", requireAuth, async (req, res) =
     where: { id: String(req.params.runId) },
     include: {
       thesis: true,
+      take: { select: { authorId: true } },
       events: { orderBy: { createdAt: "asc" } },
       candidates: { include: { score: true, token: true } }
     }
   });
   if (!run) return res.status(404).json({ error: "not_found" });
+  if (run.take && run.take.authorId !== req.user!.id && !isAdmin(req)) {
+    return res.status(403).json({ error: "forbidden" });
+  }
   if (run.status !== "DRAFT" && run.status !== "DEEP_DONE") {
     return res.status(202).json({ pending: true, status: run.status, stage: run.stage });
   }

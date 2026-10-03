@@ -33,7 +33,28 @@ function demoAllowed() {
   return env.NODE_ENV !== "production";
 }
 
-export async function upsertPrivyUser(privyId: string, extras?: { displayName?: string; walletAddress?: string }) {
+async function lookupPrivyWalletId(privyId: string, address?: string) {
+  const sdk = client();
+  if (!sdk) return undefined;
+  try {
+    const user = await sdk.getUser(privyId);
+    const accounts = Array.isArray((user as { linkedAccounts?: unknown }).linkedAccounts)
+      ? (user as { linkedAccounts: Array<Record<string, unknown>> }).linkedAccounts
+      : [];
+    const wallets = accounts.filter((a) => a.type === "wallet" || a.type === "smart_wallet");
+    const hit = address
+      ? wallets.find((w) => String(w.address ?? "").toLowerCase() === address.toLowerCase())
+      : wallets[0];
+    return typeof hit?.id === "string" ? hit.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function upsertPrivyUser(
+  privyId: string,
+  extras?: { displayName?: string; walletAddress?: string; privyWalletId?: string }
+) {
   const existing = await prisma.user.findUnique({ where: { privyId } });
   const user =
     existing ??
@@ -49,10 +70,22 @@ export async function upsertPrivyUser(privyId: string, extras?: { displayName?: 
     await prisma.user.update({ where: { id: user.id }, data: { displayName: extras.displayName } });
   }
   if (extras?.walletAddress && /^0x[0-9a-fA-F]{40}$/.test(extras.walletAddress)) {
+    const privyWalletId = (await lookupPrivyWalletId(privyId, extras.walletAddress)) ?? extras.privyWalletId;
     await prisma.wallet.upsert({
       where: { address_chainId: { address: extras.walletAddress, chainId: 4663 } },
-      update: { userId: user.id, isPrimary: true },
-      create: { userId: user.id, address: extras.walletAddress, type: "EMBEDDED", chainId: 4663, isPrimary: true }
+      update: {
+        userId: user.id,
+        isPrimary: true,
+        ...(privyWalletId ? { privyWalletId } : {})
+      },
+      create: {
+        userId: user.id,
+        address: extras.walletAddress,
+        type: "EMBEDDED",
+        chainId: 4663,
+        isPrimary: true,
+        privyWalletId
+      }
     });
   }
   return prisma.user.findUniqueOrThrow({ where: { id: user.id }, include: { wallets: true } });
@@ -113,7 +146,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (req.header("x-admin-token") !== env.ADMIN_TOKEN) {
-    return res.status(401).json({ error: "unauthorized" });
+    return res.status(403).json({ error: "forbidden" });
   }
   next();
 }

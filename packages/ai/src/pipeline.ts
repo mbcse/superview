@@ -4,7 +4,7 @@ import { criticModel, researchModel } from "./llm.js";
 import { genObject } from "./generate.js";
 import { log } from "@takeandstake/shared";
 import { cosine, embedText } from "./embed.js";
-import { matchParallelNameToUniverse } from "./universe-match.js";
+import { matchNameToUniverse } from "./universe-match.js";
 import { screenCatalog } from "./screen.js";
 import { factsFromCompany, saveResearchNotes, thesisKey, thesisNoteFromCompany } from "./company-cache.js";
 import { clearCheckpoint, mergePicks, parseCheckpoint, patchCheckpoint } from "./checkpoint.js";
@@ -173,7 +173,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
       await emit("discover", "Web search for extra names");
       const found = angle ? await runWebDiscover(discoveryObjective(spec.interpretation, angle), 8) : [];
       for (const row of found) {
-        const hit = matchParallelNameToUniverse(row.name, universe);
+        const hit = matchNameToUniverse(row.name, universe);
         discoveredNotes.push(
           hit
             ? `• ${row.name} → ${hit.symbol} (${angle?.name ?? "discover"})`

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Queue } from "bullmq";
 import { prisma } from "@takeandstake/db";
-import { serializeFeedTake, asNum, backingPrivacy, isInfraCommentBody, visibleComments } from "@takeandstake/core";
+import { serializeFeedTake, asNum, backingPrivacy, isInfraCommentBody, visibleComments, windowExcessVsSpy, rangeSince } from "@takeandstake/core";
 import { commentSchema, stanceSchema } from "@takeandstake/shared";
 import { optionalAuth, requireAuth, requireTakeAuthor } from "../middleware/auth.js";
 import { redis } from "../redis.js";
@@ -16,21 +16,38 @@ function pid(req: { params: Record<string, string | string[] | undefined> }, key
 export const socialRouter = Router();
 
 socialRouter.get("/v1/feed", optionalAuth, async (req, res) => {
-  await prisma.comment.updateMany({
-    where: { status: "VISIBLE", body: { contains: "invalid token" } },
-    data: { status: "HIDDEN" }
-  });
   const tab = String(req.query.tab ?? "for-you");
-  let authorFilter: { authorId?: { in: string[] } } = {};
-  if (tab === "following" && req.user) {
+  const q = String(req.query.q ?? "").trim();
+  const followSet = new Set<string>();
+  if (req.user) {
     const follows = await prisma.follow.findMany({
       where: { followerId: req.user.id, targetType: "USER" },
       select: { targetId: true }
     });
-    authorFilter = { authorId: { in: follows.map((f) => f.targetId) } };
+    for (const f of follows) followSet.add(f.targetId);
   }
+  let authorFilter: { authorId?: { in: string[] } } = {};
+  if (tab === "following" && req.user) {
+    authorFilter = { authorId: { in: [...followSet] } };
+  }
+  const searchFilter = q
+    ? {
+        OR: [
+          { revisions: { some: { sentence: { contains: q, mode: "insensitive" as const } } } },
+          { author: { handle: { contains: q, mode: "insensitive" as const } } },
+          { author: { displayName: { contains: q, mode: "insensitive" as const } } },
+          {
+            revisions: {
+              some: {
+                target: { holdings: { some: { token: { symbol: { contains: q, mode: "insensitive" as const } } } } }
+              }
+            }
+          }
+        ]
+      }
+    : {};
   const takes = await prisma.take.findMany({
-    where: { status: "PUBLISHED", visibility: { in: ["PUBLIC", "UNLISTED"] }, ...authorFilter },
+    where: { status: "PUBLISHED", visibility: { in: ["PUBLIC", "UNLISTED"] }, ...authorFilter, ...searchFilter },
     include: {
       author: true,
       revisions: {
@@ -54,7 +71,9 @@ socialRouter.get("/v1/feed", optionalAuth, async (req, res) => {
     avatar: t.author.avatar,
     displayName: t.author.displayName,
     authorId: t.authorId,
-    createdAt: t.createdAt
+    createdAt: t.createdAt,
+    following: followSet.has(t.authorId),
+    mine: req.user?.id === t.authorId
   }));
   if (tab === "leaderboard" || tab === "trending") {
     rows.sort((a, b) => (b.vsSpy ?? -Infinity) - (a.vsSpy ?? -Infinity));
@@ -64,9 +83,25 @@ socialRouter.get("/v1/feed", optionalAuth, async (req, res) => {
 
 socialRouter.get("/v1/leaderboard", optionalAuth, async (req, res) => {
   const period = String(req.query.period ?? "1M");
-  void period;
+  const q = String(req.query.q ?? "").trim();
+  const searchFilter = q
+    ? {
+        OR: [
+          { revisions: { some: { sentence: { contains: q, mode: "insensitive" as const } } } },
+          { author: { handle: { contains: q, mode: "insensitive" as const } } },
+          { author: { displayName: { contains: q, mode: "insensitive" as const } } },
+          {
+            revisions: {
+              some: {
+                target: { holdings: { some: { token: { symbol: { contains: q, mode: "insensitive" as const } } } } }
+              }
+            }
+          }
+        ]
+      }
+    : {};
   const takes = await prisma.take.findMany({
-    where: { status: "PUBLISHED" },
+    where: { status: "PUBLISHED", ...searchFilter },
     include: {
       author: true,
       revisions: { orderBy: { number: "desc" }, take: 1, include: { target: { include: { holdings: { include: { token: true } } } } } },
@@ -77,10 +112,28 @@ socialRouter.get("/v1/leaderboard", optionalAuth, async (req, res) => {
     },
     take: 80
   });
+  const since = rangeSince(period);
+  const windowMarks = await Promise.all(
+    takes.map(async (t) => {
+      const last = await prisma.takeValuation.findFirst({ where: { takeId: t.id }, orderBy: { asOf: "desc" } });
+      const first = await prisma.takeValuation.findFirst({
+        where: { takeId: t.id, ...(since ? { asOf: { gte: since } } : {}) },
+        orderBy: { asOf: "asc" }
+      });
+      return { id: t.id, rows: [first, last].flatMap((r) => (r ? [r] : [])) };
+    })
+  );
+  const marksById = new Map(windowMarks.map((m) => [m.id, m.rows]));
   const ranked = takes
-    .map((t) => serializeFeedTake(t, req.user?.id))
-    .filter((t) => (t.backers ?? 0) >= 0)
-    .sort((a, b) => (b.vsSpy ?? -999) - (a.vsSpy ?? -999));
+    .map((t) => {
+      const row = serializeFeedTake(t, req.user?.id);
+      const excess = windowExcessVsSpy(marksById.get(t.id) ?? [], period);
+      return { ...row, vsSpy: excess, periodRanked: excess != null };
+    })
+    .sort((a, b) => {
+      if (a.periodRanked !== b.periodRanked) return a.periodRanked ? -1 : 1;
+      return (b.vsSpy ?? -Infinity) - (a.vsSpy ?? -Infinity);
+    });
   res.json({ period, takes: ranked });
 });
 
@@ -123,12 +176,7 @@ socialRouter.get("/v1/takes/:id/comments", optionalAuth, async (req, res) => {
     },
     orderBy: { createdAt: "asc" }
   });
-  const junk = rows.filter((c) => isInfraCommentBody(c.body)).map((c) => c.id);
-  if (junk.length) {
-    await prisma.comment.updateMany({ where: { id: { in: junk } }, data: { status: "HIDDEN" } });
-  }
   const comments = visibleComments(rows)
-    .filter((c) => !junk.includes(c.id))
     .map((c) => ({
       id: c.id,
       body: c.body,
@@ -198,16 +246,18 @@ socialRouter.post("/v1/notifications/:id/read", requireAuth, async (req, res) =>
 });
 
 socialRouter.post("/v1/users/:id/follow", requireAuth, async (req, res) => {
+  const targetId = pid(req, "id");
+  if (!targetId || targetId === req.user!.id) return res.status(400).json({ error: "self" });
   const follow = await prisma.follow.upsert({
     where: {
       followerId_targetType_targetId: {
         followerId: req.user!.id,
         targetType: "USER",
-        targetId: pid(req, "id")
+        targetId
       }
     },
     update: {},
-    create: { followerId: req.user!.id, targetType: "USER", targetId: pid(req, "id") }
+    create: { followerId: req.user!.id, targetType: "USER", targetId }
   });
   res.json({ follow });
 });

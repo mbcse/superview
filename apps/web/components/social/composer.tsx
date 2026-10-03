@@ -38,7 +38,7 @@ export function Composer({
         aria-label="Write your view"
         autoFocus={autoFocus}
         rows={4}
-        className="w-full resize-none bg-transparent text-[20px] font-medium leading-[1.4] tracking-[-0.02em] text-ink outline-none placeholder:text-muted/60"
+        className="view w-full resize-none bg-transparent text-[20px] font-medium leading-[1.4] tracking-[-0.02em] text-ink outline-none placeholder:text-muted/60"
         value={value}
         onChange={(e) => onChange(e.target.value.slice(0, MAX))}
         placeholder={placeholder}
@@ -59,13 +59,13 @@ export function ComposerEntry({ initials = "You", href = "/app/compose" }: { ini
   return (
     <Link
       href={href}
-      className="post mt-4 flex items-center gap-3 px-4 py-3 hover:border-[#cfd8da]"
+      className="post mt-4 flex items-center gap-3 px-4 py-3 hover:border-teal/30"
       aria-label="Write a new view"
     >
-      <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-[#e8eef0] text-[13px] font-semibold text-ink">
+      <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-mist text-[13px] font-semibold text-teal">
         {initials.slice(0, 2).toUpperCase()}
       </span>
-      <p className="flex min-h-10 min-w-0 flex-1 items-center truncate rounded-full border border-[#e3eaec] bg-[#f8fbfb] px-4 text-[15px] text-muted">
+      <p className="flex min-h-10 min-w-0 flex-1 items-center truncate rounded-full border border-teal/15 bg-white/55 px-4 text-[15px] text-muted">
         Share a view on the world…
       </p>
       <Button size="sm" variant="primary" tabIndex={-1} aria-hidden="true">

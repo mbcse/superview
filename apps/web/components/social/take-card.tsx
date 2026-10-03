@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Copy, ChatCircle, Export, DotsThree } from "@phosphor-icons/react";
+import { Copy, ChatCircle, Export, ArrowRight } from "@phosphor-icons/react";
 import { Spark } from "@/components/charts/spark";
 import { ThesisHealth } from "@/components/social/thesis-health";
 import { useLiveQuote } from "@/components/social/price-stream";
@@ -12,6 +12,7 @@ import { fmtAgo, fmtPooled, tick } from "@/lib/fmt";
 import { fmtVsLabel, useLiveVsSpy } from "@/lib/live-vs";
 import { TickValue } from "@/components/data/tick-value";
 import { LivePrice } from "@/components/social/live-price";
+import { FollowButton } from "@/components/social/follow-button";
 
 const CHIP = ["mint", "blue", "rose", "amber"] as const;
 
@@ -35,6 +36,9 @@ export type FeedTake = {
   agentStatus?: string | null;
   spark?: number[];
   mode?: string;
+  authorId?: string;
+  following?: boolean;
+  mine?: boolean;
 };
 
 function initialsOf(name?: string | null) {
@@ -61,11 +65,13 @@ function modeLabel(mode?: string) {
 export function TakeCard({
   take,
   onInvest,
-  onCopy
+  onCopy,
+  onFollowChange
 }: {
   take: FeedTake;
   onInvest?: () => void;
   onCopy?: () => void;
+  onFollowChange?: (authorId: string, following: boolean) => void;
 }) {
   const vs = useLiveVsSpy(take.holdings, {
     spyPublish: take.spyPublish,
@@ -98,17 +104,17 @@ export function TakeCard({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={take.avatar} alt="" className="size-11 shrink-0 rounded-full object-cover" />
         ) : (
-          <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-[#e8eef0] text-[13px] font-semibold text-ink">
+          <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-mist text-[13px] font-semibold text-teal">
             {initialsOf(name)}
           </span>
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-[14px] leading-tight">
-            <span className="truncate font-semibold text-ink">{name}</span>
-            {handle ? <span className="truncate text-muted">{handle}</span> : null}
+            <span className="truncate font-semibold tracking-[-0.015em] text-ink">{name}</span>
+            {handle ? <span className="truncate text-[13px] text-muted">{handle}</span> : null}
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-muted">
-            {ago ? <span>{ago}</span> : null}
+            {ago ? <span suppressHydrationWarning>{ago}</span> : null}
             {mode ? (
               <>
                 <span aria-hidden>·</span>
@@ -122,16 +128,20 @@ export function TakeCard({
             </span>
           </p>
         </div>
-        <Link href={`/app/takes/${take.id}`} aria-label="Open view" className="grid size-9 place-items-center text-muted hover:text-ink">
-          <DotsThree size={20} />
-        </Link>
+        {take.authorId && !take.mine ? (
+          <FollowButton
+            authorId={take.authorId}
+            following={take.following}
+            onChange={(next) => onFollowChange?.(take.authorId!, next)}
+          />
+        ) : null}
       </div>
 
-      <Link href={`/app/takes/${take.id}`} className="mt-3 block text-[16px] leading-[1.45] text-ink">
+      <p className="view mt-3.5 text-[17px] font-medium leading-[1.35] tracking-[-0.02em] text-ink">
         {take.sentence ?? "Untitled view"}
-      </Link>
+      </p>
 
-      <div className="mt-3 overflow-hidden rounded-lg border border-[#e3eaec] bg-[#f8fbfb]">
+      <div className="mt-3.5 overflow-hidden rounded-xl border border-teal/10 bg-white/45">
         <div className="flex items-end justify-between gap-3 px-3 py-3">
           <div>
             <p className="text-[11px] font-medium text-muted">vs S&P 500</p>
@@ -154,11 +164,18 @@ export function TakeCard({
           </div>
           {take.spark && take.spark.length > 1 ? <Spark values={take.spark} label="vs S&P 500" /> : null}
         </div>
-        <div className="flex gap-1.5 overflow-x-auto border-t border-[#e3eaec] px-2 py-2 hide-scroll">
+        <div className="flex gap-1.5 overflow-x-auto border-t border-teal/10 px-2 py-2 hide-scroll">
           {take.holdings.map((h, i) => (
             <HoldingChip key={h.symbol} holding={h} tint={tint(i)} takeId={take.id} />
           ))}
         </div>
+        <Link
+          href={`/app/takes/${take.id}`}
+          className="flex min-h-11 items-center justify-between border-t border-teal/10 px-3 text-[13px] font-semibold text-teal hover:bg-white/55"
+        >
+          View details
+          <ArrowRight size={14} />
+        </Link>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
@@ -177,11 +194,11 @@ export function TakeCard({
         <span>{take.forks ?? 0} copies</span>
       </div>
 
-      <div className="mt-3 flex border-t border-[#e3eaec] pt-1">
+      <div className="mt-3 flex border-t border-teal/10 pt-1">
         <button
           type="button"
           onClick={() => openComments({ takeId: take.id, sentence: take.sentence })}
-          className="flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-muted hover:bg-[#f4f8f8] hover:text-ink"
+          className="flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-muted hover:bg-white/60 hover:text-ink"
           aria-label="Comment"
         >
           <ChatCircle size={16} />
@@ -191,7 +208,7 @@ export function TakeCard({
           <button
             type="button"
             onClick={onCopy}
-            className="flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-muted hover:bg-[#f4f8f8] hover:text-ink"
+            className="flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-muted hover:bg-white/60 hover:text-ink"
             aria-label="Copy view"
           >
             <Copy size={16} />
@@ -201,7 +218,7 @@ export function TakeCard({
         <button
           type="button"
           onClick={() => void share()}
-          className="flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-muted hover:bg-[#f4f8f8] hover:text-ink"
+          className="flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] font-medium text-muted hover:bg-white/60 hover:text-ink"
           aria-label={shared ? "Copied" : "Share"}
         >
           <Export size={16} />
@@ -259,7 +276,7 @@ function HoldingChip({
           whyInBasket: holding.rationale
         })
       }
-      className="flex shrink-0 items-center gap-1.5 rounded-md border border-[#e3eaec] bg-white py-1 pl-1 pr-2 text-left hover:border-teal/35"
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-teal/12 bg-white/70 py-1 pl-1 pr-2 text-left hover:border-teal/35"
     >
       {holding.logoUrl ? (
         // eslint-disable-next-line @next/next/no-img-element

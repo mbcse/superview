@@ -3,7 +3,7 @@ import { MarketingChrome } from "@/components/marketing/chrome";
 export default function LegalPage() {
   return (
     <>
-    <MarketingChrome tone="paper" />
+    <MarketingChrome />
     <main className="mx-auto w-[min(720px,calc(100%-24px))] py-16">
       <h1 className="display text-[28px] md:text-[32px]">Legal</h1>
       <p className="mt-5 text-[17px] leading-[1.6] text-muted">

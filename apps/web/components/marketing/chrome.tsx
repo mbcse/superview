@@ -1,16 +1,22 @@
 import Link from "next/link";
 import { Wordmark } from "@/components/brand";
+import { HashLink } from "@/components/marketing/hash-link";
 
-export function MarketingChrome({ tone }: { tone?: "dark" | "forest" | "paper" }) {
-  void tone;
+export function MarketingChrome() {
   return (
     <header className="sticky top-0 z-30 px-3 pt-3 md:px-6">
       <div className="glass-chrome mx-auto flex h-14 max-w-[1320px] items-center justify-between rounded-2xl px-4 md:px-5">
         <Wordmark />
-        <nav className="hidden items-center gap-7 text-[14px] md:flex" aria-label="Product">
-          <a className="text-muted hover:text-ink" href="/#how">
+        <nav className="hidden items-center gap-6 text-[14px] lg:flex" aria-label="Product">
+          <HashLink className="text-muted hover:text-ink" href="/#how">
             How it works
-          </a>
+          </HashLink>
+          <HashLink className="text-muted hover:text-ink" href="/#tokens">
+            Stock tokens
+          </HashLink>
+          <HashLink className="text-muted hover:text-ink" href="/#score">
+            vs S&P
+          </HashLink>
           <Link className="text-muted hover:text-ink" href="/explore">
             Trending
           </Link>

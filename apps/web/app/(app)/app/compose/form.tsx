@@ -15,7 +15,6 @@ import {
   PencilSimple,
   Paperclip,
   Bank,
-  Warning,
   PaperPlaneTilt
 } from "@phosphor-icons/react";
 import { useAuth } from "@/components/auth-provider";
@@ -118,7 +117,14 @@ export default function ComposeForm() {
   const [invested, setInvested] = useState<{ takeId: string; usd: number } | null>(null);
   const [step, setStep] = useState<"basket" | "invest">("basket");
   const [wantReal, setWantReal] = useState(false);
+  const [liveOk, setLiveOk] = useState(false);
   const typeTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    fetchApi<{ liveEnabled?: boolean; wallet?: { id?: string } }>("/v1/wallet")
+      .then((d) => setLiveOk(Boolean(d.liveEnabled && d.wallet)))
+      .catch(() => setLiveOk(false));
+  }, [fetchApi]);
 
   useEffect(() => {
     const stored = sessionStorage.getItem("superview-draft");
@@ -236,12 +242,23 @@ export default function ComposeForm() {
       await fetchApi(`/v1/takes/${takeId}/publish`, { method: "POST" });
       if (invest) {
         try {
-          const backed = await fetchApi<{ pocket?: { id: string }; invest?: { fills?: number } }>(`/v1/takes/${takeId}/back`, {
-            method: "POST",
-            body: JSON.stringify({ level: "DRY_RUN", mandateMode: "AUTO", amountUsd: usd, revealAmount: reveal })
-          });
+          const backed = await fetchApi<{ pocket?: { id: string }; invest?: { fills?: number; orderId?: string } }>(
+            `/v1/takes/${takeId}/back`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                level: wantReal && liveOk ? "LIVE" : "DRY_RUN",
+                mandateMode: "AUTO",
+                amountUsd: usd,
+                revealAmount: reveal
+              })
+            }
+          );
           if (backed.pocket?.id && !backed.invest?.fills) {
-            await fetchApi(`/v1/pockets/${backed.pocket.id}/dry-run-invest`, { method: "POST" });
+            await fetchApi(
+              wantReal && liveOk ? `/v1/pockets/${backed.pocket.id}/live-invest` : `/v1/pockets/${backed.pocket.id}/dry-run-invest`,
+              { method: "POST", body: JSON.stringify({ amountUsd: usd }) }
+            );
           }
         } catch {
           /* view is live; paper fill can lag */
@@ -359,7 +376,7 @@ export default function ComposeForm() {
             <AgentOrb size={16} />
             Research complete
           </p>
-          <h1 className="mt-5 text-[22px] font-semibold leading-snug tracking-[-0.02em] text-ink md:text-[28px]">“{sentence.trim()}”</h1>
+          <h1 className="view mt-5 text-[22px] font-medium leading-snug tracking-[-0.02em] text-ink md:text-[28px]">“{sentence.trim()}”</h1>
           {thesis ? <p className="mt-3 text-[15px] text-muted">{thesis}</p> : null}
           {error ? (
             <div className="mt-6">
@@ -398,8 +415,18 @@ export default function ComposeForm() {
               <p className="text-[13px] font-medium text-muted">Invest in this view</p>
               <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[12px] font-medium text-ink">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal" />
-                Paper · no real money
+                {wantReal && liveOk ? "Live USDG" : "Paper · no real money"}
               </span>
+              {liveOk ? (
+                <div className="mt-4 flex gap-2">
+                  <button type="button" onClick={() => setWantReal(false)} className={`h-8 rounded-full px-3 text-[12px] ${!wantReal ? "bg-mist text-ink" : "text-muted"}`}>
+                    Paper
+                  </button>
+                  <button type="button" onClick={() => setWantReal(true)} className={`h-8 rounded-full px-3 text-[12px] ${wantReal ? "bg-mist text-ink" : "text-muted"}`}>
+                    Live USDG
+                  </button>
+                </div>
+              ) : null}
               <label htmlFor="paper-amount" className="mt-8 block text-[13px] text-muted">
                 Amount
               </label>
@@ -441,7 +468,7 @@ export default function ComposeForm() {
                 </label>
               </div>
             </section>
-          ) : (
+          ) : liveOk ? (
             <>
               <section className="mt-12">
                 <h2 className="text-[15px] font-medium text-ink">Investing mode</h2>
@@ -451,27 +478,21 @@ export default function ComposeForm() {
                     checked={!wantReal}
                     onSelect={() => setWantReal(false)}
                     title="Paper"
-                    description="Simulated money. Track the view with zero risk."
+                    description="Live marks without live money."
                     icon={<Paperclip size={16} className="text-teal" />}
                   />
                   <RadioCard
                     name="invest-mode"
                     checked={wantReal}
                     onSelect={() => setWantReal(true)}
-                    title="Real"
-                    description="Invest real money behind your view."
+                    title="Live USDG"
+                    description="Spend real USDG from your Privy wallet."
                     icon={<Bank size={16} className="text-muted" />}
                   />
                 </div>
-                {wantReal ? (
-                  <p className="mt-3 flex items-start gap-2 rounded-2xl border border-warn/25 bg-warn/5 p-4 text-[13px] text-ink" role="alert">
-                    <Warning className="mt-0.5 shrink-0 text-warn" size={16} />
-                    Real-money investing isn’t available yet. Switch back to Paper to publish.
-                  </p>
-                ) : null}
               </section>
             </>
-          )}
+          ) : null}
           {runId ? <p className="mt-8 text-[12px] text-muted">Run {runId.slice(-8)}</p> : null}
         </main>
         <div className="fixed inset-x-0 bottom-0 z-30 px-3 pb-3">
@@ -486,7 +507,7 @@ export default function ComposeForm() {
                     Publish without investing
                   </Button>
                   <Button size="lg" variant="primary" disabled={busy || !valid} onClick={() => void publish(true)}>
-                    {busy ? "Publishing…" : valid ? `Invest ${formatMoney(usd)} paper` : "Invest"}
+                    {busy ? "Publishing…" : valid ? `Invest ${formatMoney(usd)}${wantReal && liveOk ? " USDG" : " paper"}` : "Invest"}
                   </Button>
                 </div>
               </>
@@ -502,7 +523,7 @@ export default function ComposeForm() {
                 >
                   Edit view
                 </Button>
-                <Button size="lg" variant="primary" onClick={() => setStep("invest")} disabled={wantReal}>
+                <Button size="lg" variant="primary" onClick={() => setStep("invest")} disabled={wantReal && !liveOk}>
                   <PaperPlaneTilt size={16} />
                   Continue
                 </Button>

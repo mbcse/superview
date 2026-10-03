@@ -131,9 +131,14 @@ function PocketCard({
             <Chip tone={p.mode === "LIVE" ? "live" : "paper"}>{p.mode === "DRY_RUN" ? "Paper · not real money" : p.mode === "LIVE" ? "Live" : "Watch"}</Chip>
             <Chip>{approval ? "Ask me first" : "Agent"}</Chip>
           </div>
-          <h2 className="mt-3 text-[16px] font-semibold leading-snug tracking-[-0.015em] text-ink">
+          <h2 className="view mt-3 text-[16px] font-medium leading-snug tracking-[-0.015em] text-ink">
             <Link href={`/app/takes/${p.takeId}`}>{sentence}</Link>
           </h2>
+          {last ? (
+            <p className="mt-2 text-[13px] text-muted">
+              <Link href={`/app/order/${last.id}`}>Last order · {orderStatusLabel(last.status)}</Link>
+            </p>
+          ) : null}
         </div>
         <div className="text-right">
           <p className="text-[13px] text-muted">Value</p>
@@ -201,7 +206,7 @@ function PocketCard({
             onClick={async () => {
               const j = await fetchApi<any>(`/v1/pockets/${p.id}/dry-run-invest`, { method: "POST" });
               setNotice(`${orderStatusLabel(j.status)} — ${j.fills ?? 0} names filled.`);
-              if (j.orderId) setTimeout(() => location.reload(), 800);
+              if (j.orderId) location.href = `/app/order/${j.orderId}`;
             }}
           >
             Put paper into this basket

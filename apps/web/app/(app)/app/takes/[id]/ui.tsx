@@ -19,6 +19,7 @@ import { InvestDialog } from "@/components/social/invest-dialog";
 import { ViewCommentsList } from "@/components/social/view-chat";
 import { AgentOrb } from "@/components/glass/agent-orb";
 import { TickValue } from "@/components/data/tick-value";
+import { FollowButton } from "@/components/social/follow-button";
 
 const VsChart = dynamic(() => import("@/components/charts/vs-chart").then((m) => m.VsChart), { ssr: false });
 const RANGES = ["1D", "1W", "1M", "YTD"] as const;
@@ -31,6 +32,58 @@ type AgentPayload = {
 function initialsOf(name?: string | null) {
   const parts = (name ?? "?").trim().split(/\s+/);
   return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
+}
+
+function SaveToCollection({
+  takeId,
+  fetchApi
+}: {
+  takeId: string;
+  fetchApi: ReturnType<typeof useAuthedFetch>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<Array<{ id: string; title: string }>>([]);
+  const [saved, setSaved] = useState("");
+  async function load() {
+    const d = await fetchApi<{ collections: Array<{ id: string; title: string }> }>("/v1/collections");
+    setRows(d.collections ?? []);
+    setOpen(true);
+  }
+  async function save(id?: string) {
+    let collectionId = id;
+    if (!collectionId) {
+      const created = await fetchApi<{ collection: { id: string; title: string } }>("/v1/collections", {
+        method: "POST",
+        body: JSON.stringify({ title: "Saved views" })
+      });
+      collectionId = created.collection.id;
+    }
+    await fetchApi(`/v1/collections/${collectionId}/items`, {
+      method: "POST",
+      body: JSON.stringify({ takeId })
+    });
+    setSaved("Saved");
+    setOpen(false);
+  }
+  return (
+    <div className="relative">
+      <Button variant="ghost" onClick={() => void (open ? setOpen(false) : load())}>
+        {saved || "Save"}
+      </Button>
+      {open ? (
+        <div className="absolute z-20 mt-2 w-56 rounded-[16px] border border-teal/15 bg-canvas p-2 shadow-lg">
+          {rows.map((c) => (
+            <button key={c.id} type="button" className="block w-full rounded-lg px-3 py-2 text-left text-[13px] hover:bg-mist" onClick={() => void save(c.id)}>
+              {c.title}
+            </button>
+          ))}
+          <button type="button" className="mt-1 block w-full rounded-lg px-3 py-2 text-left text-[13px] text-teal" onClick={() => void save()}>
+            New collection
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function LiveHolding({ h, takeId }: { h: any; takeId: string }) {
@@ -61,6 +114,7 @@ export default function TakeClient({ data }: { data: any }) {
   const [points, setPoints] = useState<any[]>([]);
   const [agent, setAgent] = useState<AgentPayload | null>(null);
   const [investOpen, setInvestOpen] = useState(false);
+  const [following, setFollowing] = useState(Boolean(data.following));
   const [publicUsd, setPublicUsd] = useState<number | null>(data.publicInvestedUsd ?? null);
   const [myUsd, setMyUsd] = useState<number | null>(data.myInvestedUsd ?? null);
   const [myReveal, setMyReveal] = useState<boolean | null>(data.myRevealAmount ?? null);
@@ -121,6 +175,7 @@ export default function TakeClient({ data }: { data: any }) {
         setPublicUsd(d.publicInvestedUsd ?? null);
         setMyUsd(d.myInvestedUsd ?? null);
         setMyReveal(d.myRevealAmount ?? null);
+        setFollowing(Boolean(d.following));
       })
       .catch(() => {});
     fetchApi<AgentPayload>(`/v1/takes/${take.id}/agent`)
@@ -177,12 +232,15 @@ export default function TakeClient({ data }: { data: any }) {
           <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-teal/15 bg-mist text-xs font-semibold">
             {initialsOf(authorName)}
           </span>
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-[15px] font-medium text-ink">{authorName}</p>
             <p className="text-[13px] text-muted">{take.author?.handle}</p>
           </div>
+          {take.authorId && !data.mine ? (
+            <FollowButton authorId={take.authorId} following={following} onChange={setFollowing} />
+          ) : null}
         </div>
-        <h1 className="mt-5 text-[22px] font-semibold leading-[1.3] tracking-[-0.02em] text-ink md:text-[28px]">{rev?.sentence}</h1>
+        <h1 className="view mt-5 text-[22px] font-medium leading-[1.3] tracking-[-0.02em] text-ink md:text-[28px]">{rev?.sentence}</h1>
         <p className="mt-3 flex items-center gap-1.5 text-[13px] text-muted">
           <AgentOrb size={14} /> Agent watching
         </p>
@@ -235,6 +293,7 @@ export default function TakeClient({ data }: { data: any }) {
           <Button variant="ghost" onClick={() => void back("WATCH")}>
             Watch
           </Button>
+          <SaveToCollection takeId={take.id} fetchApi={fetchApi} />
         </div>
       </section>
       {investOpen ? (

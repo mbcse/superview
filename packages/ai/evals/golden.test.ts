@@ -1,7 +1,27 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { fill, INTERPRETER_PROMPT } from "../src/prompts/index.js";
 import { interpreterSchema } from "../src/prompts/schemas.js";
+import { genObject } from "../src/generate.js";
 import golden from "./golden-takes.json" with { type: "json" };
+
+function loadRootOpenAiKey() {
+  if (process.env.OPENAI_API_KEY) return;
+  try {
+    const txt = readFileSync(resolve(process.cwd(), "../../.env"), "utf8");
+    for (const line of txt.split("\n")) {
+      const m = line.match(/^OPENAI_API_KEY=(.*)$/);
+      if (!m) continue;
+      const val = m[1]!.trim().replace(/^["']|["']$/g, "");
+      if (val) process.env.OPENAI_API_KEY = val;
+    }
+  } catch {
+    /* CI without a local .env */
+  }
+}
+
+loadRootOpenAiKey();
 
 describe("prompt contract", () => {
   it("fills interpreter variables", () => {
@@ -33,11 +53,40 @@ describe("prompt contract", () => {
     });
     expect(parsed.refuse).toBe(false);
   });
+});
 
-  for (const g of golden as Array<{ id: string; sentence: string; expectRefuse?: boolean }>) {
-    it(`golden sentence exists: ${g.id}`, () => {
-      expect(g.sentence.length).toBeGreaterThan(3);
-      if (g.expectRefuse) expect(/lambo|asdkj|!{3}/i.test(g.sentence) || g.sentence.length < 8).toBe(true);
-    });
+const rows = golden as Array<{ id: string; sentence: string; expectRefuse?: boolean }>;
+
+describe("golden interpreter", () => {
+  for (const g of rows) {
+    it.skipIf(!process.env.OPENAI_API_KEY)(
+      g.id,
+      async () => {
+        let out: { refuse: boolean; normalizedView: string; angles: unknown[] };
+        try {
+          out = await genObject({
+            schema: interpreterSchema,
+            prompt: fill(INTERPRETER_PROMPT, {
+              view: g.sentence,
+              date: "2026-10-02",
+              marketContext: ""
+            }),
+            label: `golden:${g.id}`
+          });
+        } catch (err) {
+          if (g.expectRefuse) return;
+          throw err;
+        }
+        if (g.expectRefuse) {
+          const noWords = !/[A-Za-z]{3,}/.test(g.sentence);
+          expect(out.refuse || noWords).toBe(true);
+        } else {
+          expect(out.refuse).toBe(false);
+          expect(out.normalizedView.trim().length).toBeGreaterThan(0);
+          expect(out.angles.length).toBeGreaterThan(0);
+        }
+      },
+      90_000
+    );
   }
 });

@@ -21,7 +21,7 @@ export type PickedHolding = z.infer<typeof pickSchema>["holdings"][number];
 export async function pickPortfolioHoldings(input: {
   take: string;
   interpretation: string;
-  parallelNotes: string;
+  diligenceNotes: string;
   universe: UniverseRow[];
 }): Promise<PickedHolding[]> {
   const catalog = input.universe.map((u) => ({
@@ -40,7 +40,7 @@ Take: ${input.take}
 Interpretation: ${input.interpretation}
 
 External research (company names discovered on the web):
-${input.parallelNotes || "(none yet)"}
+${input.diligenceNotes || "(none yet)"}
 
 You MUST only pick tokenId values from this holdable catalog (tokenized stocks we can actually buy):
 ${JSON.stringify(catalog, null, 2)}

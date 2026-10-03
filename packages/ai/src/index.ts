@@ -1,11 +1,11 @@
 export { thesisSpecSchema, type ThesisSpec } from "./thesis-schema.js";
 export { decomposeTake } from "./decompose-take.js";
 export { runWebDiligence, runWebDiscover, runWebNews } from "./web-research.js";
-export { matchParallelNameToUniverse, type UniverseRow } from "./universe-match.js";
+export { matchNameToUniverse, type UniverseRow } from "./universe-match.js";
 export { pickPortfolioHoldings, type PickedHolding } from "./portfolio-pick.js";
 export { criticModel, fastModel, researchModel, researchResponsesModel, socialModel, describeLlm, modelIdOf } from "./llm.js";
 export { ResearchConfigError } from "./errors.js";
-export { isRetryableError, isCreditsError, ParallelTransientError, ParallelCreditsError } from "./parallel-retry.js";
+export { isRetryableError, isCreditsError } from "./http-retry.js";
 export { runResearchPipeline, type ResearchEmitter } from "./pipeline.js";
 export { enrichToken, enrichStale, fillCompanyAbout } from "./enrichment.js";
 export { runDailyMonitor, replyToComment, writeManusMemo } from "./agent.js";

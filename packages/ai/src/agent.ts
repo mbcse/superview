@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { prisma } from "@takeandstake/db";
-import { applyGuardrails, isInfraCommentBody } from "@takeandstake/core";
+import { applyGuardrails, executePaperRebalance, isInfraCommentBody } from "@takeandstake/core";
 import { genObject } from "./generate.js";
 import { criticModel, researchModel, socialModel } from "./llm.js";
 import { fill, MANUS_MEMO_PROMPT, MONITOR_PROMPT, THREAD_REPLY_PROMPT } from "./prompts/index.js";
@@ -93,6 +93,7 @@ export async function runDailyMonitor(takeId: string) {
     }
   });
   if (out.decision !== "no_change" && guard.ok) {
+    const weights = guard.weights.filter((w) => w.tokenId !== "CASH");
     for (const pocket of take.pockets.filter((p) => p.status === "ACTIVE" && p.mode !== "WATCH")) {
       const askFirst = pocket.mandate?.mode === "APPROVAL";
       const row = await prisma.rebalanceProposal.create({
@@ -100,12 +101,36 @@ export async function runDailyMonitor(takeId: string) {
           pocketId: pocket.id,
           agentDecisionId: decision.id,
           trigger: out.decision,
-          trades: out.trades,
+          trades: { trades: out.trades, weights, cashBps: guard.cashBps },
           estCostUsd: 0,
-          status: askFirst ? "PENDING" : "AUTO_EXECUTED",
+          status: askFirst ? "PENDING" : "PENDING",
           expiresAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000)
         }
       });
+      if (!askFirst && pocket.mode === "DRY_RUN") {
+        const env = {
+          ZEROX_API_KEY: process.env.ZEROX_API_KEY,
+          ORACLE_MAX_DEVIATION: process.env.ORACLE_MAX_DEVIATION
+            ? Number(process.env.ORACLE_MAX_DEVIATION)
+            : 0.015
+        };
+        const exec = await executePaperRebalance(pocket.id, env, weights, {
+          proposalId: row.id,
+          cashBps: guard.cashBps,
+          changeSummary: out.post.slice(0, 280)
+        });
+        if (!("error" in exec)) {
+          await prisma.agentDecision.update({
+            where: { id: decision.id },
+            data: { finalTargetId: exec.targetId, status: "EXECUTED" }
+          });
+        }
+      } else if (pocket.mode === "LIVE") {
+        await prisma.rebalanceProposal.update({
+          where: { id: row.id },
+          data: { status: "PENDING" }
+        });
+      }
       await prisma.notification.create({
         data: {
           userId: pocket.userId,

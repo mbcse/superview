@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useAuthedFetch } from "@/components/use-authed-fetch";
 import { Button } from "@/components/ui/button";
@@ -18,14 +19,17 @@ export default function CirclesPage() {
   }, [fetchApi]);
   return (
     <div className="space-y-6 px-5 pb-10 pt-9 sm:px-8">
-      <PageHeader title="Circles" description="Topic rooms." />
+      <PageHeader title="Circles" description="Topic rooms for a view." />
       <div className="flex flex-wrap gap-2">
         <Input className="max-w-xs" value={name} onChange={(e) => setName(e.target.value)} name="name" />
         <Input className="max-w-sm" value={topic} onChange={(e) => setTopic(e.target.value)} name="topic" />
         <Button
           onClick={async () => {
-            await fetchApi("/v1/circles", { method: "POST", body: JSON.stringify({ name, topic }) });
-            location.reload();
+            const r = await fetchApi<{ circle: { id: string } }>("/v1/circles", {
+              method: "POST",
+              body: JSON.stringify({ name, topic })
+            });
+            if (r.circle?.id) location.href = `/app/circles/${r.circle.id}`;
           }}
         >
           Open circle
@@ -34,11 +38,13 @@ export default function CirclesPage() {
       <div className="grid gap-3 md:grid-cols-2">
         {rows.length === 0 && <p className="text-muted">No circles yet.</p>}
         {rows.map((c) => (
-          <Surface key={c.id} className="p-5">
-            <h2 className="display text-[20px]">{c.name}</h2>
-            <p className="mt-2 text-[14px] text-muted">{c.topic}</p>
-            <p className="num mt-3 text-[13px] text-muted">{c.members?.length ?? 0} / 12</p>
-          </Surface>
+          <Link key={c.id} href={`/app/circles/${c.id}`}>
+            <Surface className="p-5">
+              <h2 className="display text-[20px]">{c.name}</h2>
+              <p className="mt-2 text-[14px] text-muted">{c.topic}</p>
+              <p className="num mt-3 text-[13px] text-muted">{c.members?.length ?? 0} / 12</p>
+            </Surface>
+          </Link>
         ))}
       </div>
     </div>

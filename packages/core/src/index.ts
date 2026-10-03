@@ -3,6 +3,8 @@ export * from "./portfolio/ledger.js";
 export * from "./portfolio/mark.js";
 export * from "./portfolio/tick.js";
 export * from "./portfolio/series.js";
+export * from "./portfolio/paper-book.js";
+export * from "./market/corporate-actions.js";
 export * from "./agent/guardrails.js";
 export * from "./execution/checks.js";
 export * from "./takes/receipt.js";

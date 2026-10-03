@@ -2,6 +2,7 @@ import { Queue, UnrecoverableError, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { loadEnv } from "@takeandstake/config";
 import { prisma } from "@takeandstake/db";
+import { refreshChainlistRpcs } from "@takeandstake/chain";
 import { formatErr, log, logError } from "@takeandstake/shared";
 import {
   ingestChainlinkSnapshots,
@@ -10,6 +11,7 @@ import {
   markPockets,
   markPublishedTakes,
   syncRobinhoodCatalog,
+  syncCorporateActions,
   QUOTES_CACHE_KEY
 } from "@takeandstake/core";
 import { describeLlm, enrichStale, isRetryableError, replyToComment, runDailyMonitor, runResearchPipeline, writeManusMemo } from "@takeandstake/ai";
@@ -22,7 +24,22 @@ function redisClient() {
 }
 const connection = redisClient();
 const pub = redisClient();
-const rpc = env.ALCHEMY_RPC_URL || env.ROBINHOOD_RPC_URL;
+const rpc = env.ALCHEMY_RPC_URL || env.ROBINHOOD_RPC_URL || env.ROBINHOOD_RPC_URLS;
+
+function isStaleLock(err: unknown) {
+  return /Missing lock/i.test(err instanceof Error ? err.message : String(err));
+}
+
+function hushLocks(name: string, worker: Worker) {
+  worker.on("error", (err) => {
+    if (isStaleLock(err)) return;
+    logError("worker", name, err);
+  });
+  worker.on("failed", (job, err) => {
+    if (isStaleLock(err)) return;
+    logError("worker", `${name} failed`, err, { job: job?.name });
+  });
+}
 
 export const queues = {
   catalog: new Queue("catalog", { connection }),
@@ -45,17 +62,27 @@ async function publish(channel: string, payload: unknown) {
   await pub.publish(channel, JSON.stringify(payload));
 }
 
-new Worker(
+hushLocks(
   "catalog",
-  async () => {
-    const r = await syncRobinhoodCatalog();
-    log("worker", "catalog", r);
-    return r;
-  },
-  { connection }
+  new Worker(
+    "catalog",
+    async () => {
+      const r = await syncRobinhoodCatalog();
+      const actions = await syncCorporateActions().catch((e) => {
+        logError("worker", "corp actions", e);
+        return { written: 0 };
+      });
+      const enrich = await enrichStale(12);
+      log("worker", "catalog", { ...r, actions, enrich });
+      return { ...r, actions, enrich };
+    },
+    { connection, lockDuration: 180_000 }
+  )
 );
 
 let lastPersistAt = 0;
+let lastChainlinkAt = 0;
+let pricingBusy = false;
 const lastMids = new Map<string, number>();
 const lastTokens = new Map<string, number>();
 const lastPersisted = new Map<string, number>();
@@ -106,42 +133,54 @@ async function hydratePrevClose() {
   log("worker", "prevclose", { n: prevClose.size, from: start.toISOString() });
 }
 
-new Worker(
+hushLocks(
   "pricing",
-  async () => {
-    const day = nyDay();
-    if (day !== sessionDay) {
-      if (lastMids.size) {
-        for (const [k, v] of lastMids) prevClose.set(k, v);
+  new Worker(
+    "pricing",
+    async () => {
+      if (pricingBusy) return { skipped: true };
+      pricingBusy = true;
+      try {
+        const day = nyDay();
+        if (day !== sessionDay) {
+          if (lastMids.size) {
+            for (const [k, v] of lastMids) prevClose.set(k, v);
+          }
+          sessionOpen.clear();
+          sessionDay = day;
+        }
+        const prior = prevClose.size ? prevClose : sessionOpen;
+        const rh = await ingestRobinhoodPrices({ persist: false, prior });
+        for (const q of rh.payload) {
+          const k = q.symbol.toUpperCase();
+          lastMids.set(k, q.last);
+          if (q.tokenLast != null) lastTokens.set(k, q.tokenLast);
+          if (!sessionOpen.has(k)) sessionOpen.set(k, q.last);
+        }
+        const cache = JSON.stringify({ at: rh.at, quotes: rh.payload });
+        await pub.set(QUOTES_CACHE_KEY, cache);
+        await publish("prices", { at: rh.at, quotes: rh.payload });
+        const moved = rh.payload.some((q) => {
+          const prev = lastPersisted.get(q.symbol.toUpperCase());
+          return prev == null || Math.abs(prev - q.last) > 1e-6;
+        });
+        const due = Date.now() - lastPersistAt > 30_000;
+        if (moved || due) {
+          await persistRobinhoodQuotes(rh.payload, rh.haltUpdates, new Date(rh.at));
+          if (Date.now() - lastChainlinkAt > 5 * 60_000) {
+            await ingestChainlinkSnapshots(rpc).catch((e) => logError("worker", "chainlink", e));
+            lastChainlinkAt = Date.now();
+          }
+          lastPersistAt = Date.now();
+          for (const q of rh.payload) lastPersisted.set(q.symbol.toUpperCase(), q.last);
+        }
+        return { ...rh, persisted: moved || due };
+      } finally {
+        pricingBusy = false;
       }
-      sessionOpen.clear();
-      sessionDay = day;
-    }
-    const prior = prevClose.size ? prevClose : sessionOpen;
-    const rh = await ingestRobinhoodPrices({ persist: false, prior });
-    for (const q of rh.payload) {
-      const k = q.symbol.toUpperCase();
-      lastMids.set(k, q.last);
-      if (q.tokenLast != null) lastTokens.set(k, q.tokenLast);
-      if (!sessionOpen.has(k)) sessionOpen.set(k, q.last);
-    }
-    const cache = JSON.stringify({ at: rh.at, quotes: rh.payload });
-    await pub.set(QUOTES_CACHE_KEY, cache);
-    await publish("prices", { at: rh.at, quotes: rh.payload });
-    const moved = rh.payload.some((q) => {
-      const prev = lastPersisted.get(q.symbol.toUpperCase());
-      return prev == null || Math.abs(prev - q.last) > 1e-6;
-    });
-    const due = Date.now() - lastPersistAt > 30_000;
-    if (moved || due) {
-      await persistRobinhoodQuotes(rh.payload, rh.haltUpdates, new Date(rh.at));
-      await ingestChainlinkSnapshots(rpc).catch((e) => logError("worker", "chainlink", e));
-      lastPersistAt = Date.now();
-      for (const q of rh.payload) lastPersisted.set(q.symbol.toUpperCase(), q.last);
-    }
-    return { ...rh, persisted: moved || due };
-  },
-  { connection }
+    },
+    { connection, concurrency: 1, lockDuration: 120_000 }
+  )
 );
 
 const researchWorker = new Worker(
@@ -179,6 +218,7 @@ const researchWorker = new Worker(
   },
   { connection, concurrency: 2, lockDuration: 15 * 60_000, stalledInterval: 60_000, maxStalledCount: 2 }
 );
+hushLocks("research", researchWorker);
 
 researchWorker.on("failed", async (job, err) => {
   if (!job) return;
@@ -193,26 +233,34 @@ researchWorker.on("failed", async (job, err) => {
   logError("worker", "research exhausted", err, { run: runId, attempts: job.attemptsMade });
 });
 
-new Worker(
+hushLocks(
   "enrichment",
-  async () => {
-    const r = await enrichStale(5);
-    if (r.enriched || "skipped" in r) log("worker", "enrich", r);
-    return r;
-  },
-  { connection }
+  new Worker(
+    "enrichment",
+    async () => {
+      const r = await enrichStale(5);
+      if (r.enriched || "skipped" in r) log("worker", "enrich", r);
+      return r;
+    },
+    { connection, lockDuration: 180_000 }
+  )
 );
 
-new Worker(
+hushLocks(
   "portfolio",
-  async () => {
-    await markPublishedTakes(lastMids, lastTokens);
-    await markPockets();
-  },
-  { connection }
+  new Worker(
+    "portfolio",
+    async () => {
+      await markPublishedTakes(lastMids, lastTokens);
+      await markPockets();
+    },
+    { connection, lockDuration: 90_000 }
+  )
 );
 
-new Worker(
+hushLocks(
+  "agent",
+  new Worker(
   "agent",
   async (job) => {
     if (job.name === "memo") {
@@ -235,29 +283,36 @@ new Worker(
       }
     }
   },
-  { connection }
+    { connection, lockDuration: 180_000 }
+  )
 );
 
-new Worker(
+hushLocks(
   "social",
-  async (job) => {
-    if (job.name === "reply") {
-      log("worker", "reply", { comment: String(job.data.commentId) });
-      return replyToComment(String(job.data.commentId));
-    }
-  },
-  { connection }
+  new Worker(
+    "social",
+    async (job) => {
+      if (job.name === "reply") {
+        log("worker", "reply", { comment: String(job.data.commentId) });
+        return replyToComment(String(job.data.commentId));
+      }
+    },
+    { connection, lockDuration: 90_000 }
+  )
 );
 
-new Worker(
+hushLocks(
   "outbox",
-  async () => {
-    const events = await prisma.outboxEvent.findMany({ where: { processedAt: null }, take: 50 });
-    for (const e of events) {
-      await prisma.outboxEvent.update({ where: { id: e.id }, data: { processedAt: new Date() } });
-    }
-  },
-  { connection }
+  new Worker(
+    "outbox",
+    async () => {
+      const events = await prisma.outboxEvent.findMany({ where: { processedAt: null }, take: 50 });
+      for (const e of events) {
+        await prisma.outboxEvent.update({ where: { id: e.id }, data: { processedAt: new Date() } });
+      }
+    },
+    { connection, lockDuration: 60_000 }
+  )
 );
 
 async function schedule() {
@@ -273,7 +328,14 @@ async function schedule() {
 
 schedule()
   .then(async () => {
+    const extra = await refreshChainlistRpcs().catch(() => []);
+    if (extra.length) log("worker", "chainlist rpcs", { n: extra.length });
     await hydratePrevClose().catch((e) => logError("worker", "prevclose", e));
     log("worker", "scheduled", describeLlm());
   })
   .catch((e) => logError("worker", "schedule fail", e));
+
+process.on("unhandledRejection", (err) => {
+  if (isStaleLock(err)) return;
+  logError("worker", "unhandledRejection", err);
+});

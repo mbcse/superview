@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isFresh,
-  parallelIdFromCompany,
+  researchRunIdFromCompany,
   pruneThesis,
   readCache,
   thesisKey,
@@ -12,7 +12,7 @@ import {
 import { chunk } from "./pool.js";
 import { catalogCard } from "./screen.js";
 import { mergePicks, parseCheckpoint } from "./checkpoint.js";
-import { isRetryableError, isRetryableStatus, ParallelCreditsError, ParallelTransientError, retryDelayMs, isCreditsError } from "./parallel-retry.js";
+import { isRetryableError, isRetryableStatus, retryDelayMs, isCreditsError } from "./http-retry.js";
 
 describe("company cache", () => {
   it("keys the same thesis the same way", () => {
@@ -45,9 +45,9 @@ describe("company cache", () => {
     expect(cache.factsText).toContain("PFE");
   });
 
-  it("returns a live Parallel run id so we poll instead of starting over", () => {
-    const profile = { _cache: { thesis: { abcd: { at: new Date().toISOString(), parallelId: "run_1" } } } };
-    expect(parallelIdFromCompany(profile, "abcd")).toBe("run_1");
+  it("returns a live research run id so we poll instead of starting over", () => {
+    const profile = { _cache: { thesis: { abcd: { at: new Date().toISOString(), runId: "run_1" } } } };
+    expect(researchRunIdFromCompany(profile, "abcd")).toBe("run_1");
     expect(thesisNoteFromCompany(profile, "abcd")).toBeNull();
   });
 });
@@ -67,16 +67,15 @@ describe("checkpoint", () => {
   });
 });
 
-describe("parallel retry", () => {
+describe("http retry", () => {
   it("retries rate limits and overloads, not empty credits", () => {
     expect(isRetryableStatus(429)).toBe(true);
     expect(isRetryableStatus(503)).toBe(true);
     expect(isRetryableStatus(402, "insufficient credits")).toBe(false);
     expect(isRetryableStatus(400, "bad json")).toBe(false);
-    expect(isRetryableError(new ParallelTransientError("HTTP 429", { status: 429 }))).toBe(true);
-    expect(isRetryableError(new Error("Parallel Task timed out"))).toBe(true);
+    expect(isRetryableError(new Error("HTTP 429"))).toBe(true);
+    expect(isRetryableError(new Error("research timed out"))).toBe(true);
     expect(isRetryableError(new Error("schema mismatch"))).toBe(false);
-    expect(isRetryableError(new ParallelCreditsError("HTTP 402 insufficient credit"))).toBe(false);
     expect(isCreditsError(new Error('HTTP 402 {"message":"Insufficient credit in account, please check your plan and billing details."}'))).toBe(true);
     expect(retryDelayMs(0, 429)).toBeGreaterThanOrEqual(8_000);
   });

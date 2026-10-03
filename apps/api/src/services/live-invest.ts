@@ -1,13 +1,95 @@
 import type { Env } from "@takeandstake/config";
 import { prisma } from "@takeandstake/db";
 import { latestPrice, quoteWithinOracle } from "@takeandstake/core";
-import { fetchZeroXQuote, quoteUsdPerToken, ROBINHOOD_CHAIN_ID, USDG_MAINNET } from "@takeandstake/chain";
+import {
+  createRhClient,
+  erc20Abi,
+  fetchZeroXQuote,
+  hashIdempotency,
+  privyAuthorizationSignature,
+  privyWalletRpcUrl,
+  quoteUsdPerToken,
+  ROBINHOOD_CHAIN_ID,
+  USDG_MAINNET,
+  assertNotRawAuthorizationKey,
+  receiptFillStatus,
+  encodeFunctionData,
+  formatUnits,
+  type Address
+} from "@takeandstake/chain";
 
 function isHexAddress(addr: string) {
   return /^0x[0-9a-fA-F]{40}$/.test(addr);
 }
 
-export async function runLiveInvest(pocketId: string, env: Env, userId: string) {
+async function usdgBalance(_rpcUrl: string | undefined, owner: Address) {
+  const client = createRhClient(_rpcUrl);
+  const raw = await client.readContract({
+    address: USDG_MAINNET,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [owner]
+  });
+  return { raw, usd: Number(formatUnits(raw, 6)) };
+}
+
+async function waitReceipt(rpcUrl: string | undefined, hash: `0x${string}`, timeoutMs = 90_000) {
+  const client = createRhClient(rpcUrl);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const rec = await client.getTransactionReceipt({ hash }).catch(() => null);
+    if (rec) return rec;
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+  return null;
+}
+
+async function privySend(env: Env, privyWalletId: string, from: Address, tx: { to: string; data: string; value?: string }) {
+  const url = privyWalletRpcUrl(privyWalletId);
+  const body = {
+    method: "eth_sendTransaction",
+    params: {
+      from,
+      to: tx.to,
+      data: tx.data,
+      value: tx.value ?? "0x0",
+      chain_id: ROBINHOOD_CHAIN_ID
+    }
+  };
+  const signature = privyAuthorizationSignature({
+    method: "POST",
+    url,
+    body,
+    privyAppId: env.PRIVY_APP_ID,
+    authorizationKey: env.PRIVY_AUTHORIZATION_KEY
+  });
+  assertNotRawAuthorizationKey(signature, env.PRIVY_AUTHORIZATION_KEY);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Basic ${Buffer.from(`${env.PRIVY_APP_ID}:${env.PRIVY_APP_SECRET}`).toString("base64")}`,
+      "privy-app-id": env.PRIVY_APP_ID,
+      "privy-authorization-signature": signature
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`privy_sign ${res.status}: ${await res.text()}`);
+  const json = (await res.json()) as { result?: string; hash?: string; data?: { hash?: string } };
+  const hash = json.result ?? json.hash ?? json.data?.hash;
+  if (!hash || hash === env.PRIVY_AUTHORIZATION_KEY) throw new Error("privy_no_hash");
+  return hash as `0x${string}`;
+}
+
+export function fillStatusFromReceipt(rec: { status?: string } | null) {
+  return receiptFillStatus(rec);
+}
+
+export async function readUsdgBalance(env: Env, address: string) {
+  return usdgBalance(env.ALCHEMY_RPC_URL || env.ROBINHOOD_RPC_URL, address as Address);
+}
+
+export async function runLiveInvest(pocketId: string, env: Env, userId: string, amountUsd?: number) {
   const pause = await prisma.featureFlag.findUnique({ where: { key: "pause_trading" } });
   const live = await prisma.featureFlag.findUnique({ where: { key: "live_trading" } });
   if (pause?.enabled) return { error: "paused" as const };
@@ -26,47 +108,62 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string) 
           }
         }
       },
-      user: { include: { wallets: true } }
+      user: { include: { wallets: { include: { signerGrants: true } } } }
     }
   });
   if (!pocket || pocket.userId !== userId || pocket.mode !== "LIVE") return { error: "not_found" as const };
+  if (pocket.user.jurisdictionStatus !== "ALLOWED") return { error: "restricted_jurisdiction" as const };
   const wallet = pocket.user.wallets.find((w) => w.isPrimary) ?? pocket.user.wallets[0];
-  if (!wallet) return { error: "no_wallet" as const };
-  const grant = await prisma.signerGrant.findFirst({ where: { walletId: wallet.id, revokedAt: null } });
+  if (!wallet?.privyWalletId) return { error: "no_wallet" as const };
+  const grant = wallet.signerGrants.find((g) => !g.revokedAt && g.expiresAt > new Date());
   if (!grant) return { error: "no_grant" as const };
 
   const target = pocket.take.revisions[0]?.target;
   if (!target) return { error: "no_target" as const };
-  const cash = await prisma.ledgerAccount.findFirst({ where: { pocketId: pocket.id, kind: "CASH" } });
-  if (!cash) return { error: "no_cash" as const };
-  const entries = await prisma.ledgerEntry.findMany({ where: { accountId: cash.id } });
-  const cashUnits = entries.reduce((s, e) => s + BigInt(e.amount.toFixed(0)), 0n);
+  const rpc = env.ALCHEMY_RPC_URL || env.ROBINHOOD_RPC_URL;
+  const onchain = await usdgBalance(rpc, wallet.address as Address);
+  const spendUsd = Math.min(amountUsd ?? onchain.usd, onchain.usd, env.LIVE_DAILY_CAP_USD);
+  if (!(spendUsd > 1)) return { error: "no_usdg" as const };
+
+  const idempotencyKey = hashIdempotency(["live", pocket.id, String(Math.round(spendUsd * 100)), target.id]);
+  const existing = await prisma.order.findUnique({ where: { idempotencyKey } });
+  if (existing) return { orderId: existing.id, status: existing.status, fills: 0, skipped: 0, legs: [], idempotent: true };
 
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
   const priorLegs = await prisma.orderLeg.findMany({
     where: {
-      order: { pocketId: pocket.id, mode: "LIVE", createdAt: { gte: todayStart }, status: { in: ["FILLED", "PARTIAL"] } }
+      order: { pocketId: pocket.id, mode: "LIVE", createdAt: { gte: todayStart }, status: { in: ["FILLED", "PARTIAL", "SUBMITTED"] } }
     }
   });
   let spentToday = priorLegs.reduce((s, l) => s + Number(l.sellAmount) / 1e6, 0);
+  const allowed = new Set(
+    (Array.isArray(grant.allowedContracts) ? (grant.allowedContracts as string[]) : []).map((c) => c.toLowerCase())
+  );
 
   const order = await prisma.order.create({
-    data: { pocketId: pocket.id, mode: "LIVE", kind: "INVEST", status: "SUBMITTING" }
+    data: { pocketId: pocket.id, mode: "LIVE", kind: "INVEST", status: "SUBMITTING", idempotencyKey }
   });
+  const cash = await prisma.ledgerAccount.upsert({
+    where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "CASH", tokenId: "USDG" } },
+    update: {},
+    create: { pocketId: pocket.id, kind: "CASH", tokenId: "USDG" }
+  });
+
   const legsOut: Array<{ symbol: string; status: string; skip?: string; tx?: string }> = [];
   let filled = 0;
   let skipped = 0;
+  const budgetMicro = BigInt(Math.round(spendUsd * 1e6));
 
   for (const h of target.holdings) {
-    const sell = (cashUnits * BigInt(h.weightBps)) / 10_000n;
+    const sell = (budgetMicro * BigInt(h.weightBps)) / 10_000n;
     const usd = Number(sell) / 1e6;
     if (h.token.isTradingHalt) {
       skipped += 1;
       legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "halt" });
       continue;
     }
-    if (usd > env.LIVE_MAX_TRADE_USD) {
+    if (usd > env.LIVE_MAX_TRADE_USD || usd > Number(grant.maxPerTxUsd)) {
       skipped += 1;
       legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "cap" });
       continue;
@@ -81,8 +178,17 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string) 
       legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "no_quote" });
       continue;
     }
+    const leg = await prisma.orderLeg.create({
+      data: {
+        orderId: order.id,
+        side: "BUY",
+        tokenId: h.tokenId,
+        sellAmount: sell.toString(),
+        status: "QUOTED"
+      }
+    });
     try {
-      const quote = await fetchZeroXQuote({
+      let quote = await fetchZeroXQuote({
         apiKey: env.ZEROX_API_KEY,
         chainId: ROBINHOOD_CHAIN_ID,
         sellToken: USDG_MAINNET,
@@ -96,74 +202,99 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string) 
       const oracle = snap ? Number(snap.price) : implied;
       if (!quoteWithinOracle(implied, oracle, env.ORACLE_MAX_DEVIATION)) {
         skipped += 1;
+        await prisma.orderLeg.update({ where: { id: leg.id }, data: { status: "SKIPPED", skipReason: "oracle_offside" } });
         legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "oracle_offside" });
         continue;
       }
-      const txHash = await signAndBroadcast(env, wallet.address, quote);
-      const leg = await prisma.orderLeg.create({
-        data: {
-          orderId: order.id,
-          side: "BUY",
-          tokenId: h.tokenId,
-          sellAmount: sell.toString(),
-          status: "FILLED"
+      const spender = quote.issues?.allowance?.spender;
+      if (spender) {
+        if (allowed.size && !allowed.has(spender.toLowerCase())) {
+          skipped += 1;
+          await prisma.orderLeg.update({ where: { id: leg.id }, data: { status: "SKIPPED", skipReason: "spender_not_allowed" } });
+          legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "spender_not_allowed" });
+          continue;
         }
-      });
-      await prisma.chainTx.create({
+        const data = encodeFunctionData({
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [spender as Address, sell]
+        });
+        const approveHash = await privySend(env, wallet.privyWalletId, wallet.address as Address, { to: USDG_MAINNET, data });
+        const rec = await waitReceipt(rpc, approveHash);
+        if (!rec || rec.status !== "success") throw new Error("approve_failed");
+        quote = await fetchZeroXQuote({
+          apiKey: env.ZEROX_API_KEY,
+          chainId: ROBINHOOD_CHAIN_ID,
+          sellToken: USDG_MAINNET,
+          buyToken: h.token.contractAddress,
+          sellAmount: sell.toString(),
+          taker: wallet.address,
+          firm: true
+        });
+      }
+      if (!quote.transaction) throw new Error("no_tx");
+      if (allowed.size && !allowed.has(quote.transaction.to.toLowerCase())) {
+        skipped += 1;
+        await prisma.orderLeg.update({ where: { id: leg.id }, data: { status: "SKIPPED", skipReason: "router_not_allowed" } });
+        legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "router_not_allowed" });
+        continue;
+      }
+      await prisma.quote.create({
         data: {
           legId: leg.id,
-          txHash,
-          status: "SUBMITTED"
+          quoteJson: quote as object,
+          buyAmount: quote.buyAmount,
+          price: implied,
+          expiresAt: new Date(Date.now() + 30_000)
         }
       });
-      spentToday += usd;
+      const txHash = await privySend(env, wallet.privyWalletId, wallet.address as Address, quote.transaction);
+      await prisma.orderLeg.update({ where: { id: leg.id }, data: { status: "SUBMITTED" } });
+      const chainTx = await prisma.chainTx.create({
+        data: { legId: leg.id, txHash, status: "SUBMITTED" }
+      });
+      const rec = await waitReceipt(rpc, txHash);
+      if (!rec || fillStatusFromReceipt(rec) !== "FILLED") {
+        await prisma.chainTx.update({ where: { id: chainTx.id }, data: { status: "FAILED", error: "revert_or_timeout" } });
+        await prisma.orderLeg.update({ where: { id: leg.id }, data: { status: "FAILED", skipReason: "no_receipt" } });
+        skipped += 1;
+        legsOut.push({ symbol: h.token.symbol, status: "FAILED", skip: "no_receipt", tx: txHash });
+        continue;
+      }
+      await prisma.chainTx.update({
+        where: { id: chainTx.id },
+        data: { status: "CONFIRMED", blockNumber: rec.blockNumber }
+      });
       const pos = await prisma.ledgerAccount.upsert({
         where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "POSITION", tokenId: h.tokenId } },
         update: {},
         create: { pocketId: pocket.id, kind: "POSITION", tokenId: h.tokenId }
       });
-      const tx = await prisma.ledgerTransaction.create({ data: { pocketId: pocket.id, type: "FILL" } });
-      await prisma.ledgerEntry.createMany({
-        data: [
-          { transactionId: tx.id, accountId: cash.id, amount: (-sell).toString(), usdValue: -usd },
-          { transactionId: tx.id, accountId: pos.id, amount: quote.buyAmount, usdValue: usd }
-        ]
+      await prisma.$transaction(async (tx) => {
+        const ledgerTx = await tx.ledgerTransaction.create({
+          data: { pocketId: pocket.id, type: "FILL", orderLegId: leg.id, txHash }
+        });
+        await tx.ledgerEntry.createMany({
+          data: [
+            { transactionId: ledgerTx.id, accountId: cash.id, amount: (-sell).toString(), usdValue: -usd },
+            { transactionId: ledgerTx.id, accountId: pos.id, amount: quote.buyAmount, usdValue: usd }
+          ]
+        });
+        await tx.orderLeg.update({ where: { id: leg.id }, data: { status: "FILLED" } });
       });
+      spentToday += usd;
       filled += 1;
       legsOut.push({ symbol: h.token.symbol, status: "FILLED", tx: txHash });
     } catch (e) {
       skipped += 1;
+      await prisma.orderLeg.update({
+        where: { id: leg.id },
+        data: { status: "FAILED", skipReason: e instanceof Error ? e.message.slice(0, 120) : "swap_failed" }
+      });
       legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: e instanceof Error ? e.message : "swap_failed" });
     }
   }
   const status = filled === 0 ? "FAILED" : skipped > 0 ? "PARTIAL" : "FILLED";
   await prisma.order.update({ where: { id: order.id }, data: { status } });
   return { orderId: order.id, status, fills: filled, skipped, legs: legsOut };
-}
-
-async function signAndBroadcast(env: Env, from: string, quote: { transaction?: { to: string; data: string; value: string } }) {
-  const tx = quote.transaction;
-  if (!tx) throw new Error("no_tx");
-  const res = await fetch("https://api.privy.io/v1/wallets/rpc", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Basic ${Buffer.from(`${env.PRIVY_APP_ID}:${env.PRIVY_APP_SECRET}`).toString("base64")}`,
-      "privy-app-id": env.PRIVY_APP_ID,
-      "privy-authorization-signature": env.PRIVY_AUTHORIZATION_KEY
-    },
-    body: JSON.stringify({
-      method: "eth_sendTransaction",
-      params: {
-        from,
-        to: tx.to,
-        data: tx.data,
-        value: tx.value ?? "0x0",
-        chain_id: 4663
-      }
-    })
-  });
-  if (!res.ok) throw new Error(`privy_sign ${res.status}: ${await res.text()}`);
-  const json = (await res.json()) as { result?: string; hash?: string };
-  return json.result ?? json.hash ?? "0xpending";
 }

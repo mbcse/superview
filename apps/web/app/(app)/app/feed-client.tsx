@@ -43,10 +43,11 @@ export default function FeedClient({ initial }: { initial: FeedTake[] }) {
   const firstName = (displayName ?? "").trim().split(/\s+/)[0];
 
   useEffect(() => {
-    fetchApi<{ takes: FeedTake[] }>(`/v1/feed?tab=${TAB_API[tab]}`)
+    const query = q.trim() ? `&q=${encodeURIComponent(q.trim())}` : "";
+    fetchApi<{ takes: FeedTake[] }>(`/v1/feed?tab=${TAB_API[tab]}${query}`)
       .then((d) => setTakes(d.takes ?? []))
       .catch(() => {});
-  }, [fetchApi, tab]);
+  }, [fetchApi, tab, q]);
 
   const visible = useMemo(() => {
     const query = q.toLowerCase();
@@ -55,6 +56,14 @@ export default function FeedClient({ initial }: { initial: FeedTake[] }) {
       return `${t.sentence ?? ""} ${t.author} ${t.holdings.map((h) => h.symbol).join(" ")}`.toLowerCase().includes(query);
     });
   }, [takes, q]);
+
+  function followChanged(authorId: string, following: boolean) {
+    setTakes((rows) => {
+      const next = rows.map((t) => (t.authorId === authorId ? { ...t, following } : t));
+      if (tab === "Following" && !following) return next.filter((t) => t.authorId !== authorId);
+      return next;
+    });
+  }
 
   async function copyView(id: string) {
     try {
@@ -96,14 +105,25 @@ export default function FeedClient({ initial }: { initial: FeedTake[] }) {
         <ul className="mt-2 space-y-2">
           {visible.map((t) => (
             <li key={t.id}>
-              <TakeCard take={t} onCopy={() => void copyView(t.id)} onInvest={() => setInvestTake(t)} />
+              <TakeCard
+                take={t}
+                onCopy={() => void copyView(t.id)}
+                onInvest={() => setInvestTake(t)}
+                onFollowChange={followChanged}
+              />
             </li>
           ))}
         </ul>
       ) : (
         <EmptyState
-          title="Nobody you follow has posted yet"
-          body={q ? "Try another search." : "Follow a few people whose views you want to sit with, and they’ll show up here."}
+          title={tab === "Following" ? "Nobody you follow has posted yet" : "No views yet"}
+          body={
+            q
+              ? "Try another search."
+              : tab === "Following"
+                ? "Follow people whose views you want to sit with, and they’ll show up here."
+                : "Write a view or explore trending."
+          }
           action={
             <Button variant="primary" onClick={() => setTab("Trending")}>
               Explore views <ArrowRight size={16} />

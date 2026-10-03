@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { HashLink } from "@/components/marketing/hash-link";
 
 export default function MarketingLayout({ children }: { children: ReactNode }) {
   return (
@@ -8,6 +9,8 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
       <footer className="mx-auto w-[min(1200px,calc(100%-24px))] py-14 text-[13px] text-muted">
         <p className="max-w-[52ch]">Stock tokens, not shares. Not advice. Restricted in the US and other countries.</p>
         <div className="mt-5 flex flex-wrap gap-5">
+          <HashLink href="/#how">How it works</HashLink>
+          <HashLink href="/#tokens">Stock tokens</HashLink>
           <Link href="/legal">Legal</Link>
           <Link href="/explore">Trending</Link>
           <Link href="/login">Log in</Link>

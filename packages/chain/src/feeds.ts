@@ -1,11 +1,12 @@
-import { createPublicClient, http, type Address } from "viem";
+import { createPublicClient, type Address } from "viem";
 import { aggregatorV3Abi, erc8056Abi } from "./abi.js";
 import { robinhoodChain } from "./constants.js";
+import { createRhTransport } from "./rpc-pool.js";
 
-export function createRhClient(rpcUrl: string) {
+export function createRhClient(rpcUrl?: string | readonly string[]) {
   return createPublicClient({
     chain: robinhoodChain,
-    transport: http(rpcUrl)
+    transport: createRhTransport(rpcUrl)
   });
 }
 

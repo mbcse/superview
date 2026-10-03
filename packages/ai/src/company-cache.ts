@@ -4,7 +4,7 @@ import { prisma } from "@takeandstake/db";
 export const FACTS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const THESIS_TTL_MS = 36 * 60 * 60 * 1000;
 
-export type ThesisHit = { at: string; text?: string; parallelId?: string };
+export type ThesisHit = { at: string; text?: string; runId?: string };
 export type CompanyCache = {
   factsText?: string;
   factsAt?: string;
@@ -45,9 +45,9 @@ export function thesisNoteFromCompany(profile: unknown, key: string): string | n
   return hit.text;
 }
 
-export function parallelIdFromCompany(profile: unknown, key: string): string | null {
+export function researchRunIdFromCompany(profile: unknown, key: string): string | null {
   const { cache } = readCache(profile);
-  return cache.thesis?.[key]?.parallelId || null;
+  return cache.thesis?.[key]?.runId || null;
 }
 
 export function pruneThesis(thesis: Record<string, ThesisHit>, keep = 8) {
@@ -62,21 +62,21 @@ export function pruneThesis(thesis: Record<string, ThesisHit>, keep = 8) {
 export async function saveResearchNotes(
   companyId: string,
   profile: unknown,
-  opts: { factsText?: string; thesisKey?: string; thesisText?: string; parallelId?: string | null }
+  opts: { factsText?: string; thesisKey?: string; thesisText?: string; runId?: string | null }
 ) {
   const { rest, cache } = readCache(profile);
   if (opts.factsText) {
     cache.factsText = opts.factsText.slice(0, 4000);
     cache.factsAt = new Date().toISOString();
   }
-  if (opts.thesisKey && (opts.thesisText || opts.parallelId || opts.parallelId === null)) {
+  if (opts.thesisKey && (opts.thesisText || opts.runId || opts.runId === null)) {
     const prev = cache.thesis?.[opts.thesisKey] ?? { at: new Date().toISOString() };
     cache.thesis = pruneThesis({
       ...(cache.thesis ?? {}),
       [opts.thesisKey]: {
         at: new Date().toISOString(),
         text: opts.thesisText?.slice(0, 4000) ?? prev.text,
-        parallelId: opts.parallelId === null ? undefined : (opts.parallelId ?? prev.parallelId)
+        runId: opts.runId === null ? undefined : (opts.runId ?? prev.runId)
       }
     });
   }

@@ -27,9 +27,19 @@ export default function ProfilePage() {
         <DeltaPill className="mt-2" value={avg} points />
       </Surface>
       <Surface className="p-2">
+        <Link href="/app/circles" className="flex items-center justify-between gap-3 border-b border-teal/10 px-4 py-3">
+          <p className="text-[15px]">Circles</p>
+          <span className="text-[13px] text-muted">Join a room</span>
+        </Link>
+        <Link href="/app/collections" className="flex items-center justify-between gap-3 px-4 py-3">
+          <p className="text-[15px]">Collections</p>
+          <span className="text-[13px] text-muted">Saved views</span>
+        </Link>
+      </Surface>
+      <Surface className="p-2">
         {takes.map((t) => (
           <Link key={t.id} href={`/app/takes/${t.id}`} className="flex items-center justify-between gap-3 border-b border-teal/10 px-4 py-3 last:border-0">
-            <p className="min-w-0 truncate text-[15px] font-medium">{t.sentence ?? "View"}</p>
+            <p className="view min-w-0 truncate text-[15px] font-medium">{t.sentence ?? "View"}</p>
             <DeltaPill value={t.vsSpy} points />
           </Link>
         ))}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bucketMsForRange, buildTakeSeries, dropUnitMixMarks, logicalBarsForRange, rangeSpanMs } from "./series.js";
+import { bucketMsForRange, buildTakeSeries, dropUnitMixMarks, logicalBarsForRange, rangeSpanMs, windowExcessVsSpy } from "./series.js";
 
 describe("buildTakeSeries", () => {
   it("uses a tighter bucket for 1D than 1M", () => {
@@ -35,5 +35,20 @@ describe("buildTakeSeries", () => {
     expect(logicalBarsForRange("1M")).toBe(1440);
     expect(rangeSpanMs("1W")).toBeGreaterThan(rangeSpanMs("1D"));
     expect(rangeSpanMs("1M")).toBeGreaterThan(rangeSpanMs("1W"));
+  });
+
+  it("ranks 1D vs All from different windows", () => {
+    const now = Date.parse("2026-10-01T12:00:00Z");
+    const rows = [
+      { asOf: new Date(now - 8 * 24 * 60 * 60 * 1000), indexValue: 100, benchmarkIndex: 100 },
+      { asOf: new Date(now - 7 * 24 * 60 * 60 * 1000), indexValue: 108, benchmarkIndex: 101 },
+      { asOf: new Date(now - 2 * 60 * 60 * 1000), indexValue: 107, benchmarkIndex: 101.5 },
+      { asOf: new Date(now), indexValue: 107.2, benchmarkIndex: 101.6 }
+    ];
+    const all = windowExcessVsSpy(rows, "All", now);
+    const oneDay = windowExcessVsSpy(rows, "1D", now);
+    expect(all).toBeCloseTo(5.6, 5);
+    expect(oneDay).toBeCloseTo(0.1, 5);
+    expect(all).not.toEqual(oneDay);
   });
 });

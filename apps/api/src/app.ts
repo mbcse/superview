@@ -3,20 +3,21 @@ import express, { type NextFunction, type Request, type Response } from "express
 import helmet from "helmet";
 import { loadEnv } from "@takeandstake/config";
 import { prisma } from "@takeandstake/db";
-import { runDryRunInvest } from "./services/paper-invest.js";
+import { executePaperRebalance, runDryRunInvest } from "./services/paper-invest.js";
 import { runLiveInvest } from "./services/live-invest.js";
 import { handlePocketChat } from "./services/pocket-chat.js";
 import { portfolioFromRun, withDraftPayload } from "./services/portfolio-from-run.js";
+import { fillCompanyAbout, enrichStale } from "@takeandstake/ai";
 import {
   canonicalReceipt,
   verifyReceipt,
-  tickMarket,
   listQuotes,
   takeSeries,
   buildLiveBoard,
   computePocketMark,
   asNum,
   syncRobinhoodCatalog,
+  syncCorporateActions,
   filterQuotes,
   QUOTES_CACHE_KEY,
   backingPrivacy,
@@ -24,12 +25,13 @@ import {
   visibleComments,
   loadTokenCard
 } from "@takeandstake/core";
-import { fillCompanyAbout } from "@takeandstake/ai";
+import { refreshChainlistRpcs } from "@takeandstake/chain";
 import { STOCK_TOKEN_COPY, backRequestSchema, backingPrivacySchema, commentSchema, pocketChatSchema, stanceSchema, log, logError } from "@takeandstake/shared";
 import { optionalAuth, requireAdmin, requireAuth, requirePocketOwner, requireTakeAuthor, verifyPrivyWebhook } from "./middleware/auth.js";
 import { meRouter } from "./routes/me.js";
 import { researchRouter } from "./routes/research.js";
 import { socialRouter } from "./routes/social.js";
+import { deskRouter } from "./routes/desk.js";
 import { streamRouter } from "./routes/stream.js";
 import { redis } from "./redis.js";
 
@@ -60,6 +62,7 @@ app.use((req, res, next) => {
 app.use(meRouter);
 app.use(researchRouter);
 app.use(socialRouter);
+app.use(deskRouter);
 app.use(streamRouter);
 
 app.get("/health", (_req, res) => {
@@ -76,10 +79,12 @@ app.get("/v1/catalog", async (_req, res) => {
   res.json({ tokens, disclaimer: STOCK_TOKEN_COPY });
 });
 
-app.post("/v1/catalog/sync", async (_req, res) => {
+app.post("/v1/catalog/sync", requireAdmin, async (_req, res) => {
   try {
     const r = await syncRobinhoodCatalog();
-    res.json(r);
+    const actions = await syncCorporateActions().catch((e) => ({ error: String(e) }));
+    const enrich = await enrichStale(12);
+    res.json({ ...r, actions, enrich });
   } catch (e) {
     res.status(502).json({ error: "catalog_sync_failed", detail: String(e) });
   }
@@ -102,7 +107,12 @@ app.get("/v1/tokens/:symbol", async (req, res) => {
   const found = await loadTokenCard(pid(req, "symbol"));
   if (!found) return res.status(404).json({ error: "not_found" });
   if (!found.card.about) kickAboutFill(found.tokenId);
-  res.json({ ...found.card, filling: !found.card.about });
+  const actions = await prisma.corporateAction.findMany({
+    where: { tokenId: found.tokenId },
+    orderBy: { processDate: "desc" },
+    take: 8
+  });
+  res.json({ ...found.card, filling: !found.card.about, actions });
 });
 
 app.get("/v1/quotes", async (req, res) => {
@@ -168,9 +178,26 @@ app.get("/v1/takes/:id", optionalAuth, async (req, res) => {
   if (!take) return res.status(404).json({ error: "not_found" });
   const privacy = backingPrivacy(take.backings, req.user?.id);
   const backings = take.backings.map((b) => sanitizeBacking(b, req.user?.id));
+  const mine = req.user?.id === take.authorId;
+  const following =
+    Boolean(req.user) && !mine
+      ? Boolean(
+          await prisma.follow.findUnique({
+            where: {
+              followerId_targetType_targetId: {
+                followerId: req.user!.id,
+                targetType: "USER",
+                targetId: take.authorId
+              }
+            }
+          })
+        )
+      : false;
   res.json({
     take: { ...take, backings, comments: visibleComments(take.comments) },
     disclaimer: STOCK_TOKEN_COPY,
+    following,
+    mine,
     ...privacy
   });
 });
@@ -447,7 +474,13 @@ app.post("/v1/pockets/:id/dry-run-invest", requireAuth, async (req, res) => {
 app.post("/v1/pockets/:id/live-invest", requireAuth, async (req, res) => {
   const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
   if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
-  const result = await runLiveInvest(pid(req, "id"), env, req.user!.id);
+  const amountUsd = Number(req.body?.amountUsd);
+  const result = await runLiveInvest(
+    pid(req, "id"),
+    env,
+    req.user!.id,
+    Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : undefined
+  );
   if ("error" in result) {
     const code = result.error;
     const status = code === "not_found" ? 404 : code === "live_disabled" || code === "paused" ? 403 : 400;
@@ -459,11 +492,13 @@ app.post("/v1/pockets/:id/live-invest", requireAuth, async (req, res) => {
 app.post("/v1/wallets/:id/grant", requireAuth, async (req, res) => {
   const wallet = await prisma.wallet.findFirst({ where: { id: pid(req, "id"), userId: req.user!.id } });
   if (!wallet) return res.status(404).json({ error: "not_found" });
+  if (!wallet.privyWalletId) return res.status(400).json({ error: "no_privy_wallet" });
+  const contracts = Array.isArray(req.body?.allowedContracts) ? req.body.allowedContracts : [];
   const grant = await prisma.signerGrant.create({
     data: {
       walletId: wallet.id,
-      privySignerId: String(req.body?.privySignerId ?? "session"),
-      allowedContracts: req.body?.allowedContracts ?? [],
+      privySignerId: wallet.privyWalletId,
+      allowedContracts: contracts,
       maxPerTxUsd: env.LIVE_MAX_TRADE_USD,
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     }
@@ -523,7 +558,21 @@ app.post("/v1/pockets/:id/mandate", requireAuth, async (req, res) => {
 app.post("/v1/proposals/:id/approve", requireAuth, async (req, res) => {
   const proposal = await prisma.rebalanceProposal.findUnique({
     where: { id: pid(req, "id") },
-    include: { pocket: true }
+    include: {
+      pocket: {
+        include: {
+          take: {
+            include: {
+              revisions: {
+                orderBy: { number: "desc" },
+                take: 1,
+                include: { target: { include: { holdings: true } } }
+              }
+            }
+          }
+        }
+      }
+    }
   });
   if (!proposal) return res.status(404).json({ error: "not_found" });
   if (proposal.pocket.userId !== req.user!.id) return res.status(403).json({ error: "forbidden" });
@@ -535,20 +584,28 @@ app.post("/v1/proposals/:id/approve", requireAuth, async (req, res) => {
   if (proposal.pocket.mode === "LIVE") {
     const live = await prisma.featureFlag.findUnique({ where: { key: "live_trading" } });
     if (!live?.enabled) return res.status(403).json({ error: "live_trading_disabled" });
+    return res.status(409).json({ error: "live_rebalance_uses_live_invest" });
   }
-  await prisma.rebalanceProposal.update({ where: { id: proposal.id }, data: { status: "APPROVED" } });
-  const order = await prisma.order.create({
-    data: {
-      pocketId: proposal.pocketId,
-      mode: proposal.pocket.mode === "LIVE" ? "LIVE" : "DRY_RUN",
-      kind: "REBALANCE",
-      status: proposal.pocket.mode === "DRY_RUN" ? "APPROVED" : "PENDING_APPROVAL"
-    }
+  const trades = proposal.trades as { weights?: Array<{ tokenId: string; weightBps: number; rationale?: string }>; cashBps?: number };
+  const weights =
+    trades?.weights ??
+    proposal.pocket.take.revisions[0]?.target?.holdings.map((h) => ({
+      tokenId: h.tokenId,
+      weightBps: h.weightBps
+    })) ??
+    [];
+  if (!weights.length) return res.status(400).json({ error: "no_weights" });
+  const result = await executePaperRebalance(proposal.pocketId, env, weights, {
+    proposalId: proposal.id,
+    cashBps: trades?.cashBps,
+    changeSummary: "Approved rebalance"
   });
-  if (proposal.pocket.mode === "DRY_RUN") {
-    await prisma.order.update({ where: { id: order.id }, data: { status: "FILLED" } });
-  }
-  res.json({ proposalId: proposal.id, status: "APPROVED", orderId: order.id });
+  if ("error" in result) return res.status(400).json({ error: result.error });
+  await prisma.rebalanceProposal.update({
+    where: { id: proposal.id },
+    data: { status: "APPROVED" }
+  });
+  res.json({ proposalId: proposal.id, status: "APPROVED", orderId: result.orderId, targetId: result.targetId });
 });
 
 app.post("/v1/proposals/:id/skip", requireAuth, async (req, res) => {
@@ -678,13 +735,7 @@ app.get("/v1/live/board", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const rpc = env.ALCHEMY_RPC_URL || env.ROBINHOOD_RPC_URL;
   const send = async () => {
-    try {
-      await tickMarket(rpc);
-    } catch (err) {
-      logError("api", "tickMarket", err);
-    }
     const board = await buildLiveBoard();
     res.write(`data: ${JSON.stringify(board)}\n\n`);
   };
@@ -721,14 +772,25 @@ app.post("/v1/collections", requireAuth, async (req, res) => {
 });
 
 app.post("/v1/collections/:id/items", requireAuth, async (req, res) => {
+  const col = await prisma.collection.findUnique({ where: { id: pid(req, "id") } });
+  if (!col) return res.status(404).json({ error: "not_found" });
+  if (col.ownerId !== req.user!.id) return res.status(403).json({ error: "forbidden" });
   const item = await prisma.collectionItem.create({
-    data: { collectionId: pid(req, "id"), takeId: String(req.body.takeId), note: req.body.note }
+    data: { collectionId: col.id, takeId: String(req.body.takeId), note: req.body.note }
   });
   res.json({ item });
 });
 
-app.get("/v1/collections", async (_req, res) => {
-  const collections = await prisma.collection.findMany({ include: { items: true, owner: true } });
+app.get("/v1/collections", optionalAuth, async (req, res) => {
+  const collections = await prisma.collection.findMany({
+    where: {
+      OR: [
+        { visibility: "PUBLIC" },
+        ...(req.user ? [{ ownerId: req.user.id }] : [])
+      ]
+    },
+    include: { items: true, owner: true }
+  });
   res.json({ collections });
 });
 
@@ -739,14 +801,23 @@ app.post("/v1/circles", requireAuth, async (req, res) => {
       name: String(req.body.name ?? "Circle"),
       topic: String(req.body.topic ?? ""),
       createdBy: user.id,
+      visibility: "PUBLIC",
       members: { create: { userId: user.id, role: "AUTHOR" } }
     }
   });
   res.json({ circle });
 });
 
-app.get("/v1/circles", async (_req, res) => {
-  const circles = await prisma.circle.findMany({ include: { members: true } });
+app.get("/v1/circles", optionalAuth, async (req, res) => {
+  const circles = await prisma.circle.findMany({
+    where: {
+      OR: [
+        { visibility: "PUBLIC" },
+        ...(req.user ? [{ members: { some: { userId: req.user.id } } }] : [])
+      ]
+    },
+    include: { members: true }
+  });
   res.json({ circles });
 });
 
@@ -799,10 +870,6 @@ app.post("/v1/agent/cycle/:takeId", requireAuth, async (req, res) => {
   res.json({ queued: true, takeId: take.id });
 });
 
-app.post("/webhooks/parallel", async (req, res) => {
-  await prisma.webhookDelivery.create({ data: { source: "parallel", payload: req.body ?? {} } });
-  res.json({ ok: true });
-});
 app.post("/webhooks/privy", async (req, res) => {
   const ok = await verifyPrivyWebhook(req);
   if (!ok) return res.status(401).json({ error: "invalid_webhook" });
@@ -836,10 +903,9 @@ export function start() {
   process.on("unhandledRejection", (err) => {
     logError("api", "unhandledRejection", err);
   });
-  const rpc = env.ALCHEMY_RPC_URL || env.ROBINHOOD_RPC_URL;
-  const pulse = () => void tickMarket(rpc).catch((err) => logError("api", "tickMarket", err));
-  pulse();
-  setInterval(pulse, 15_000);
+  void refreshChainlistRpcs().then((urls) => {
+    if (urls.length) log("api", "chainlist rpcs", { n: urls.length });
+  });
   app.listen(env.API_PORT, () => {
     log("api", "listening", { port: env.API_PORT, mode: env.APP_MODE });
   });

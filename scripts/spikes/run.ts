@@ -62,33 +62,12 @@ async function spikeChainlink() {
   });
 }
 
-async function spikeParallel() {
-  const key = process.env.PARALLEL_API_KEY;
-  if (!key) return skip("Parallel FindAll", "PARALLEL_API_KEY missing");
-  const res = await fetch("https://api.parallel.ai/v1beta/findall/runs", {
-    method: "POST",
-    headers: {
-      "x-api-key": key,
-      "content-type": "application/json",
-      "parallel-beta": "findall-2025-09-15"
-    },
-    body: JSON.stringify({
-      objective: "Companies that manufacture industrial robot arms or humanoid robots",
-      entity_type: "companies",
-      match_conditions: [
-        {
-          name: "makes_robots",
-          description: "Company designs or manufactures robot arms, humanoids, or mobile robots."
-        }
-      ],
-      generator: "preview",
-      match_limit: 5
-    })
-  });
-  console.log("OK Parallel FindAll status", res.status, await res.text().then((t) => t.slice(0, 400)));
+async function main() {
+  console.log("takeAndStake day-1 spikes");
+  await spikeChainlink().catch((e) => console.error("FAIL Chainlink", e));
+  await spikeZeroX().catch((e) => console.error("FAIL 0x", e));
+  await spikePrivy().catch((e) => console.error("FAIL Privy", e));
 }
-
-async function spikePrivy() {
   const appId = process.env.PRIVY_APP_ID;
   const secret = process.env.PRIVY_APP_SECRET;
   if (!appId || !secret) {

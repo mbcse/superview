@@ -31,7 +31,7 @@ export function Wordmark({
     <Link
       href={href}
       className={cn(
-        "inline-flex items-center rounded font-semibold tracking-[-0.03em] no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal/40",
+        "inline-flex items-center rounded font-display font-semibold tracking-[-0.03em] no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal/40",
         small ? "text-[20px] leading-none" : "text-[24px] leading-none",
         light ? "text-white" : "text-ink",
         className

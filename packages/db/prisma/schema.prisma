@@ -163,6 +163,7 @@ enum LegStatus {
 
 enum CircleRole {
   AUTHOR
+  MEMBER
   RESEARCHER
   SKEPTIC
   ALLOCATOR
@@ -263,6 +264,7 @@ model Wallet {
   userId          String
   user            User             @relation(fields: [userId], references: [id])
   address         String
+  privyWalletId   String?
   type            WalletType       @default(EMBEDDED)
   chainId         Int              @default(4663)
   isPrimary       Boolean          @default(true)
@@ -369,13 +371,15 @@ model PriceSnapshot {
 
 model CorporateAction {
   id          String      @id @default(cuid())
-  rhjId       String?
+  rhjId       String?     @unique
   tokenId     String
   token       StockToken  @relation(fields: [tokenId], references: [id])
   type        String
   status      String
   processDate DateTime?
   details     Json?
+
+  @@index([tokenId, processDate])
 }
 
 model MarketCalendar {
@@ -702,6 +706,8 @@ model RebalanceProposal {
   fromTarget      PortfolioTarget? @relation("FromTarget", fields: [fromTargetId], references: [id])
   toTargetId      String?
   toTarget        PortfolioTarget? @relation("ToTarget", fields: [toTargetId], references: [id])
+  orderId         String?
+  order           Order?          @relation(fields: [orderId], references: [id])
   trades          Json
   estCostUsd      Decimal         @db.Decimal(18, 6)
   status          RebalanceStatus @default(PENDING)
@@ -847,16 +853,18 @@ model AgentDecision {
 }
 
 model Order {
-  id                 String      @id @default(cuid())
+  id                 String               @id @default(cuid())
   pocketId           String
-  pocket             Pocket      @relation(fields: [pocketId], references: [id])
+  pocket             Pocket               @relation(fields: [pocketId], references: [id])
   mode               OrderMode
   kind               OrderKind
-  status             OrderStatus @default(DRAFT)
+  status             OrderStatus          @default(DRAFT)
   approvedAt         DateTime?
   approvalSignature  String?
+  idempotencyKey     String?              @unique
   legs               OrderLeg[]
-  createdAt          DateTime    @default(now())
+  proposals          RebalanceProposal[]
+  createdAt          DateTime             @default(now())
 }
 
 model OrderLeg {
@@ -868,6 +876,7 @@ model OrderLeg {
   sellAmount    Decimal    @db.Decimal(78, 0)
   minBuyAmount  Decimal?   @db.Decimal(78, 0)
   status        LegStatus  @default(PENDING)
+  skipReason    String?
   attempts      Int        @default(0)
   quotes        Quote[]
   txs           ChainTx[]
