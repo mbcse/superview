@@ -26,7 +26,8 @@ const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? process.env.PRIVY_APP
 const nextConfig: NextConfig = {
   transpilePackages: ["@takeandstake/shared", "remotion", "@remotion/player"],
   env: {
-    NEXT_PUBLIC_API_ORIGIN: process.env.API_ORIGIN ?? "http://localhost:4000",
+    NEXT_PUBLIC_API_ORIGIN:
+      process.env.NEXT_PUBLIC_API_ORIGIN ?? process.env.API_ORIGIN ?? "http://localhost:4000",
     NEXT_PUBLIC_PRIVY_APP_ID: privyAppId
   },
   async redirects() {
