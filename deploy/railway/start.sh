@@ -34,6 +34,11 @@ fi
 if [ "$role" = "all" ]; then
   echo "railway: starting worker beside api"
   env -u PORT pnpm --filter @takeandstake/worker start &
+  worker_pid=$!
+  (
+    wait "$worker_pid"
+    echo "railway: worker exited $?" >&2
+  ) &
   exec pnpm --filter @takeandstake/api start
 fi
 

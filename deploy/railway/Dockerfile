@@ -34,4 +34,4 @@ ENV HOST=0.0.0.0
 EXPOSE 4000
 
 ENTRYPOINT ["sh", "/app/deploy/railway/start.sh"]
-CMD ["api"]
+CMD ["all"]
