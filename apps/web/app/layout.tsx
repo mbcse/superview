@@ -17,9 +17,14 @@ const saans = localFont({
 export const metadata: Metadata = {
   title: "SuperView",
   description: "Write a view. An agent finds the companies, invests, and rebalances.",
+  icons: {
+    icon: "/superview-logo.png",
+    apple: "/superview-logo.png"
+  },
   openGraph: {
     title: "SuperView",
-    description: "Invest in what you believe."
+    description: "Invest in what you believe.",
+    images: [{ url: "/superview-logo.png", width: 1024, height: 1024, alt: "SuperView" }]
   }
 };
 

@@ -2,29 +2,33 @@
 
 **Say what you believe about the world. Watch it play out.**
 
-SuperView turns a one-sentence market view into a researched basket of [Robinhood Chain](https://robinhood.com) stock tokens, tracks it against the S&P 500, and makes the result social. Users can publish views, follow the people whose ideas perform, copy a basket, and build a portfolio around live market signals.
+SuperView is a social investing product for people who start with a belief about the world, not a ticker. You write one sentence. An agent turns that sentence into a researched basket of [Robinhood Chain](https://robinhood.com) stock tokens. The basket is published as a view, marked live against the S&P 500, and opened to follow, comment, copy, and invest.
 
-The product is designed around a simple belief: investing should start with what you think about the world, not with a ticker search box.
+The product thesis is simple. People already have views on technology, health, geopolitics, climate, culture, and supply chains. Those views almost never become a sized, benchmarked book. SuperView is the loop that closes that gap: write, research, publish, track, and rebalance as the story changes.
 
 ---
 
 ## The problem
 
-People constantly form views about technology, geopolitics, climate, health, culture, and supply chains. Those views rarely become structured portfolios.
+A belief like “malaria cases will rise” is not a portfolio. Turning it into one requires an economic mechanism, a set of comparable exposures, risk limits, and weights. Most social finance products skip that work and rank opinions by attention. Most portfolio tools skip the belief and start at a symbol search box.
+
+SuperView treats the view as the object. Performance is public. Status comes from how the book does versus the S&P 500, not from follower count.
 
 The gap exists for three reasons:
 
-1. **Translation is hard.** A belief like “malaria cases will rise” is not a ticker. It needs an economic mechanism, comparable exposures, risks, and position sizing.
+1. **Translation is hard.** A belief is not a ticker. It needs a mechanism, comparable exposures, risks, and position sizing.
 2. **Social conviction is unmeasured.** Most finance feeds reward opinions, not outcomes. SuperView attaches every published view to a live benchmarked basket.
-3. **Portfolio construction is still too heavy.** SuperView compresses the research workflow into an agent-led product experience, then lets users engage through a live market simulation or, when enabled, wallet-based USDG execution.
-
-SuperView creates the loop: write a view, let the agent research it, publish the basket, track performance, and rebalance as the story changes.
+3. **Portfolio construction is still too heavy.** SuperView compresses the research workflow into an agent-led product, then lets users engage through a live market simulation or, when enabled, wallet-based USDG execution.
 
 ---
 
-## What we are building
+## What a user does
 
-SuperView is a **social investing network for market views**.
+1. Write a short view in their own words from Home or New view.
+2. Watch the agent interpret the thesis, screen the Robinhood Chain catalog, research candidates, and size a 5 to 12 name basket.
+3. Publish. The view becomes a social object: thesis, holdings, comments, copy, and invest.
+4. Track live last prices, today’s move, the value of money they put on the view, and how that book is doing versus the S&P 500.
+5. Follow people whose views work. Copy a basket into their own portfolio. Let the agent keep watching and propose trims, adds, exits, or a full rebalance.
 
 | Surface | What you do |
 | --- | --- |
@@ -34,28 +38,20 @@ SuperView is a **social investing network for market views**.
 | Portfolio | Track positions, fills, marks, and rebalances |
 | Leaderboard | Rank views by market performance, not follower count |
 
-SuperView uses Robinhood Chain stock tokens as the market instrument. These instruments provide economic exposure to listed companies and are handled with jurisdiction and product controls. The default demo flow uses simulated execution against live quotes, while live USDG execution is separately gated.
-
 ---
 
 ## How a view becomes a book
 
+The agent is an investment committee, not a single prompt.
+
 1. **Write.** A short belief in the user’s own words.
-2. **Interpret.** The agent extracts the economic mechanism, horizon, assumptions, falsifiers, and 3-6 investable angles.
+2. **Interpret.** The agent extracts the economic mechanism, horizon, assumptions, falsifiers, and 3 to 6 investable angles.
 3. **Retrieve.** It screens the Robinhood Chain catalog, supplements with web discovery, and maps companies back to eligible instruments.
 4. **Diligence.** Each candidate receives research notes and scores for directness, exposure purity, confidence, quality, and risk.
-5. **Construct.** A portfolio manager sizes a 5-12 name basket across direct, indirect, shared-interest, and hedge roles.
+5. **Construct.** A portfolio manager sizes a 5 to 12 name basket across direct, indirect, shared-interest, and hedge roles.
 6. **Review.** A separate critic model can approve the basket or force a revision.
 7. **Publish.** The result becomes a social object with a public thesis, holdings, comments, and live vs S&P score.
 8. **Monitor.** The agent continues watching the thesis and can propose trims, additions, exits, or rebalances.
-
-The demo flow emphasizes simulated execution against live quotes. Live USDG execution is wired behind `APP_MODE=live`, the `live_trading` flag, and a Privy wallet signed with a P-256 authorization key.
-
----
-
-## The agent
-
-The agent is structured as an **investment committee**, not a single prompt.
 
 ```
 view
@@ -75,10 +71,33 @@ view
 
 - Only names that exist as active Robinhood Chain tokens
 - Halted names excluded
-- Construction: typically 5-12 holdings, issuer / sector / role caps, then equal-weight fallback if a single-theme basket would otherwise die
+- Construction: typically 5 to 12 holdings, issuer / sector / role caps, then equal-weight fallback if a single-theme basket would otherwise fail
 - Simulated SELL legs are capped to held quantity; pocket mutations serialize under `FOR UPDATE`
 - View reads: author always; others only `PUBLISHED` and `PUBLIC` or `UNLISTED`
 - Agent memos do not dump prompts or raw JSON into the public thread
+
+---
+
+## After you invest
+
+The view page is not only a vs S&P headline.
+
+- **Your stake** shows current value, dollar P&L, and percent. Right after a fill that is today’s tape applied to the amount you put in. Once the mark leaves the fill, it becomes since you invested.
+- **Versus S&P 500** is a separate live number for the basket versus SPY.
+- **Each name** shows last, today’s percent, and the dollar P&L on your slice of the basket.
+- **Portfolio** shows the same mark at pocket level: value, dollar P&L, percent of cost, vs S&P, and per-name dollars.
+
+Quotes come from Robinhood’s price feed every second, into Redis, then to the app over poll plus server-sent events. Day change is versus the prior cash session close. Weekends use Friday versus Thursday, not a flat zero. Wide after-hours books are clamped to the cash-session range so a stale bid/ask does not invent P&L.
+
+---
+
+## Markets and execution
+
+SuperView uses Robinhood Chain stock tokens as the market instrument. These instruments provide economic exposure to listed companies and are handled with jurisdiction and product controls.
+
+The default demo uses simulated execution against live quotes so anyone can complete the loop safely: view, agent, basket, mark, copy, rebalance. Live USDG execution is wired and gated behind `APP_MODE=live`, the `live_trading` flag, and a Privy wallet signed with a P-256 authorization key.
+
+SuperView is not a broker and does not give investment advice.
 
 ---
 
@@ -97,20 +116,17 @@ view
                                     cosine, not pgvector)
 ```
 
+pnpm and Turborepo.
+
 | Piece | Role |
 | --- | --- |
-| **Web** | Next.js 15 / React 19. Feed, compose, take, pockets, marketing |
-| **API** | Express. Auth (Privy), research jobs, social graph, execution routes, `/v1/stream/prices` |
-| **Worker** | Catalog, 1s Robinhood quotes → Redis `quotes:last`, marks, research pipeline, monitor |
-| **Core** | Basket construction, vs S&P series, simulated ledger, take access |
-| **AI** | Prompts, committee, web research, view guard |
-| **Chain** | Robinhood + chainlist RPC pool, 0x, oracles, Privy signing |
-
-Quotes: RHJ REST every 1s → Redis → poll + SSE. Day change is vs prior cash session close (weekends use Friday vs Thursday, not a flat 0%).
-
----
-
-## Repo
+| **Web** | Next.js 15 and React 19. Feed, compose, view, portfolio, marketing. Hosted on Vercel. |
+| **API** | Express. Privy auth, research jobs, social graph, execution, `/v1/stream/prices`. |
+| **Worker** | Catalog, 1s quotes, marks, research pipeline, daily monitor. |
+| **Core** | Basket construction, vs S&P series, ledger, take access. |
+| **AI** | Committee prompts, web research, view guard. |
+| **Chain** | Robinhood and chainlist RPC pool, 0x, oracles, Privy signing. |
+| **DB** | Postgres and Prisma. JSON embeddings with cosine similarity, not pgvector. |
 
 ```
 apps/web          SuperView UI
@@ -124,7 +140,7 @@ packages/config   env
 deploy/railway    Hobby Docker (API + worker)
 ```
 
-pnpm + Turborepo. Typeface: Saans display, Geist body.
+Typeface: Saans display, Geist body.
 
 ---
 
@@ -188,14 +204,14 @@ Hobby is usage-billed and this worker ticks quotes every second, so expect to sp
 
 ---
 
-## What to show judges
+## What to show
 
-1. Write a view from Home or New view. Watch interpret → screen → diligence → basket.
-2. Publish. Open the view: vs S&P, holdings with live last / day change, comments.
+1. Write a view from Home or New view. Watch interpret, screen, diligence, and construct.
+2. Publish. Open the view: live last, today, your stake if you invested, vs S&P, holdings, comments.
 3. Invest in simulation. Confirm the portfolio ledger moved against live quotes.
-4. Trending + leaderboard use the same live mark.
+4. Trending and the leaderboard use the same live mark.
 
-The strongest demo is the full simulated investing loop: view, agent, basket, live mark, copied exposure, and rebalance. Live trading is wired and gated, but the submission experience is strongest when the audience can safely see the complete loop.
+The strongest demo is the full simulated loop: view, agent, basket, live mark, copied exposure, and rebalance. Live trading is present and gated. For a room of judges, the complete visible loop is the point.
 
 ---
 

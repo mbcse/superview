@@ -296,7 +296,7 @@ export default function ComposeForm() {
               Cancel
             </button>
           </div>
-          <div className="flex min-h-0 flex-1 items-start pt-8 md:pt-14">
+          <div className="flex min-h-0 flex-1 items-start justify-end pt-8 md:pt-14">
             <ResearchLiveLog events={events} />
           </div>
           <div className="glass-night flex items-center gap-4 rounded-2xl px-5 py-4 md:gap-6">
