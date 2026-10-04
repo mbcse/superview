@@ -32,4 +32,11 @@ describe("mergeQuote", () => {
     expect(r.quote.seq).toBe(first.seq);
     expect(r.quote.dir).toBeNull();
   });
+
+  it("bumps seq when the day move updates", () => {
+    const first = mergeQuote(undefined, base).quote;
+    const r = mergeQuote(first, { ...base, chgPct: 0.012 });
+    expect(r.changed).toBe(true);
+    expect(r.quote.seq).toBe((first.seq ?? 0) + 1);
+  });
 });

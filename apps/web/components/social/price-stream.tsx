@@ -72,7 +72,7 @@ function startPriceStream() {
   let wantedPull = 0;
   void pull();
   connect();
-  const poll = window.setInterval(() => void pull(), 750);
+  const poll = window.setInterval(() => void pull(), 500);
   const offWanted = onWanted(() => {
     window.clearTimeout(wantedPull);
     wantedPull = window.setTimeout(() => void pull(), 80);

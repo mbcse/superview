@@ -8,6 +8,8 @@ type RhQuote = {
   ask?: string;
   tokenBid?: string;
   tokenAsk?: string;
+  dailyHigh?: string;
+  dailyLow?: string;
   dailyTradingVolume?: string;
   isTradingHalt?: boolean;
   generatedAt?: string;
@@ -74,6 +76,32 @@ export function dayChangePct(last: number | null | undefined, prior: number | nu
   const pct = (last - prior) / prior;
   if (!Number.isFinite(pct) || Math.abs(pct) > 0.45) return null;
   return pct;
+}
+
+/** Prefer a cash-session print over a weekend book with a 3%+ spread. */
+export function sessionLast(args: {
+  mid: number | null;
+  bid: number | null;
+  ask: number | null;
+  high?: number | null;
+  low?: number | null;
+  fallback?: number | null;
+}) {
+  const { mid, bid, ask, high, low, fallback } = args;
+  if (mid == null) return fallback ?? null;
+  const spread = bid != null && ask != null && mid > 0 ? (ask - bid) / mid : 0;
+  const wide = spread > 0.03;
+  const outside = high != null && low != null && (mid > high * 1.015 || mid < low * 0.985);
+  if (wide || outside) {
+    if (high != null && low != null) return Math.min(high, Math.max(low, mid));
+    return fallback ?? mid;
+  }
+  return mid;
+}
+
+export function isNyWeekend(ms = Date.now()) {
+  const wd = nyWeekday(ms);
+  return wd === "Sat" || wd === "Sun";
 }
 
 export function inheritAliasChg<T extends { symbol: string; chgPct?: number | null }>(quotes: T[]) {
@@ -181,7 +209,16 @@ export async function fetchRobinhoodQuotes(prior?: Map<string, number>) {
     const tokenAsk = num(q.tokenAsk);
     const shareMid = midOf(bid, ask);
     const tokenMid = midOf(tokenBid, tokenAsk);
-    const last = shareMid ?? tokenMid;
+    const high = num(q.dailyHigh);
+    const low = num(q.dailyLow);
+    const last = sessionLast({
+      mid: shareMid ?? tokenMid,
+      bid,
+      ask,
+      high,
+      low,
+      fallback: lookupPx(prior, symbol) ?? null
+    });
     if (last == null) continue;
     const vol = num(q.dailyTradingVolume);
     const halt = Boolean(q.isTradingHalt);
@@ -359,6 +396,26 @@ export async function prevCloseByTokens(tokens: Array<{ id: string; symbol: stri
   for (const s of snaps) {
     const n = Number(s.price);
     if (Number.isFinite(n)) latest.set(s.tokenId, n);
+  }
+  const missingIds = ids.filter((id) => !latest.has(id));
+  if (missingIds.length) {
+    const opens = await prisma.$queryRaw<Array<{ tokenId: string; price: unknown }>>`
+      SELECT s."tokenId", s.price
+      FROM "PriceSnapshot" s
+      JOIN (
+        SELECT "tokenId", MIN("observedAt") AS seen
+        FROM "PriceSnapshot"
+        WHERE source = 'RH_REST'::"PriceSource"
+          AND "observedAt" >= ${start}
+          AND "tokenId" IN (${Prisma.join(missingIds)})
+        GROUP BY "tokenId"
+      ) first ON first."tokenId" = s."tokenId" AND first.seen = s."observedAt"
+      WHERE s.source = 'RH_REST'::"PriceSource"
+    `;
+    for (const s of opens) {
+      const n = Number(s.price);
+      if (Number.isFinite(n)) latest.set(s.tokenId, n);
+    }
   }
   const out = new Map<string, number>();
   for (const t of tokens) {

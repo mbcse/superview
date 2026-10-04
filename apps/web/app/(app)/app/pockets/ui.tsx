@@ -7,12 +7,14 @@ import { PaperPlaneTilt } from "@phosphor-icons/react";
 import { useAuthedFetch } from "@/components/use-authed-fetch";
 import { Button } from "@/components/ui/button";
 import { Chip, EmptyState, Notice, Surface } from "@/components/ui/surface";
-import { fmtUsd, orderStatusLabel, skipReason, tick } from "@/lib/fmt";
+import { fmtUsd, fmtUsdDelta, fmtVs, orderStatusLabel, skipReason, tick } from "@/lib/fmt";
 import { proposalLine } from "@/lib/agent-copy";
+import { useLiveBook } from "@/lib/live-vs";
 import { AllocationBar } from "@/components/data/allocation-bar";
 import { AnimatedNumber } from "@/components/data/animated-number";
 import { DeltaPill } from "@/components/data/delta-pill";
 import { HoldingRow } from "@/components/data/holding-row";
+import { TickValue } from "@/components/data/tick-value";
 import { useQuoteBook } from "@/components/social/price-stream";
 
 type Leg = {
@@ -21,6 +23,7 @@ type Leg = {
   last?: number | null;
   mtm?: number | null;
   pnl?: number | null;
+  cost?: number | null;
 };
 
 function liveLast(quotes: ReturnType<typeof useQuoteBook>, symbol?: string, fallback?: number | null) {
@@ -119,10 +122,21 @@ function PocketCard({
     return s + Number(l.mtm ?? 0);
   }, 0);
   const nav = cashUsd + livePositions || Number(p.navUsd ?? p.mark?.navUsd);
-  const cost = legs.reduce((s, l: any) => s + Number(l.cost ?? 0), 0);
+  const cost = legs.reduce((s, l) => s + Number(l.cost ?? 0), 0);
   const pnl = livePositions - cost || p.unrealizedUsd || p.mark?.unrealizedUsd;
   const weightOf = (leg: Leg) =>
     nav > 0 ? Math.round((((liveLast(quotes, leg.symbol, leg.last) ?? 0) * (leg.qty ?? 0) || Number(leg.mtm ?? 0)) / nav) * 10_000) : 0;
+  const book = useLiveBook(
+    legs.map((l) => ({
+      symbol: l.symbol ?? "",
+      weightBps: weightOf(l) || 1,
+      last: liveLast(quotes, l.symbol, l.last),
+      publish: l.qty && l.cost ? Number(l.cost) / l.qty : null
+    })),
+    { investedUsd: cost > 0 ? cost : null }
+  );
+  const vs = book.vs ?? book.vsSpy;
+  const pnlPct = book.displayPct ?? (cost > 0 && pnl != null ? pnl / cost : null);
 
   return (
     <Surface className="p-6">
@@ -144,26 +158,59 @@ function PocketCard({
         <div className="text-right">
           <p className="text-[13px] text-muted">Value</p>
           <p className="figure text-[28px]">
-            <AnimatedNumber value={nav} format={(n) => fmtUsd(n)} />
+            <AnimatedNumber value={book.valueUsd ?? nav} format={(n) => fmtUsd(n)} />
           </p>
-          <div className="mt-1 flex justify-end">
-            <DeltaPill value={nav && pnl != null ? pnl / Math.max(1, nav) : null} />
+          <div className="mt-1 flex flex-wrap items-center justify-end gap-2">
+            <TickValue
+              value={book.pnlUsd ?? pnl}
+              format={fmtUsdDelta}
+              pulse={book.seq}
+              color="sign"
+              className="font-mono text-[13px]"
+            />
+            <DeltaPill value={pnlPct} />
           </div>
+          {vs != null ? (
+            <p className="mt-1 font-mono text-[12px] text-muted">
+              vs S&P 500{" "}
+              <TickValue
+                value={vs}
+                format={(n) => fmtVs(n)}
+                pulse={Math.abs(vs) >= 0.005 ? book.seq : undefined}
+                color="sign"
+                className="font-mono text-[12px]"
+              />
+            </p>
+          ) : null}
         </div>
       </div>
       {legs.length ? (
         <div className="mt-5">
           <AllocationBar parts={legs.map((l) => ({ symbol: l.symbol ?? "", weightBps: weightOf(l) }))} />
           <div className="mt-2">
-            {legs.map((leg) => (
-              <HoldingRow
-                key={leg.symbol}
-                symbol={leg.symbol ?? ""}
-                weightBps={weightOf(leg)}
-                last={liveLast(quotes, leg.symbol, leg.last)}
-                takeId={p.takeId}
-              />
-            ))}
+            {legs.map((leg) => {
+              const lastPx = liveLast(quotes, leg.symbol, leg.last);
+              const qty = leg.qty ?? 0;
+              const livePnl =
+                lastPx != null && qty
+                  ? lastPx * qty - Number(leg.cost ?? 0)
+                  : (leg.pnl ?? book.legs.find((l) => tick(l.symbol) === tick(leg.symbol ?? ""))?.pnlUsd ?? null);
+              const day = quotes[String(leg.symbol ?? "").toUpperCase()]?.chgPct
+                ?? quotes[tick(leg.symbol ?? "").toUpperCase()]?.chgPct
+                ?? quotes[`RH${tick(leg.symbol ?? "").toUpperCase()}`]?.chgPct
+                ?? null;
+              return (
+                <HoldingRow
+                  key={leg.symbol}
+                  symbol={leg.symbol ?? ""}
+                  weightBps={weightOf(leg)}
+                  last={lastPx}
+                  chgPct={day}
+                  pnlUsd={livePnl}
+                  takeId={p.takeId}
+                />
+              );
+            })}
           </div>
         </div>
       ) : null}

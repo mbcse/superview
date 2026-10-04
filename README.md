@@ -1,97 +1,180 @@
 # SuperView
 
-Write a view. An agent finds the companies, invests, and rebalances. Watch it play out vs the S&P 500.
+**Say what you believe about the world. Watch it play out.**
 
-The app opens on a feed of views. Each post is a researched basket of Robinhood Chain stock tokens, with live marks, comments, copy view, and invest. Paper is the default: live marks, a paper USDG ledger, and rebalance fills that actually move the book. Live USDG stays behind `live_trading` + `APP_MODE=live` + a Privy wallet signed with a P-256 authorization key.
+SuperView turns a one-sentence market view into a researched basket of [Robinhood Chain](https://robinhood.com) stock tokens, tracks it against the S&P 500, and makes the result social. Users can publish views, follow the people whose ideas perform, copy a basket, and build a portfolio around live market signals.
 
-Copy uses **Stock Tokens**, never “tokenized stocks.” This is not investment advice. Stock Tokens are economic exposure, not share ownership. They are not available to US persons or residents of the UK, Canada, Switzerland, the UAE, sanctioned countries, or other restricted jurisdictions.
+The product is designed around a simple belief: investing should start with what you think about the world, not with a ticker search box.
 
-## How it works
+---
 
-1. Write a one-sentence view.
-2. The agent researches Robinhood Chain names (OpenAI + the catalog), sizes a basket, and publishes the view.
-3. The feed shows vs S&P 500 live, holdings with ticking prices, comments, and invest.
-4. An agent watches published views and, on paper, writes a new target then fills SELL/BUY legs in one transaction.
+## The problem
 
-Paper is the default. Seed keeps `live_trading` off. Demo-user fallback is on in development; production stays off unless `ALLOW_DEMO_USER=true`. Seeded views ship with **illustrative** vs S&P history so period tabs can diverge; live quotes overlay that path. New views start from real marks only.
+People constantly form views about technology, geopolitics, climate, health, culture, and supply chains. Those views rarely become structured portfolios.
 
-## Stack
+The gap exists for three reasons:
 
-| Piece | What |
+1. **Translation is hard.** A belief like “malaria cases will rise” is not a ticker. It needs an economic mechanism, comparable exposures, risks, and position sizing.
+2. **Social conviction is unmeasured.** Most finance feeds reward opinions, not outcomes. SuperView attaches every published view to a live benchmarked basket.
+3. **Portfolio construction is still too heavy.** SuperView compresses the research workflow into an agent-led product experience, then lets users engage through a live market simulation or, when enabled, wallet-based USDG execution.
+
+SuperView creates the loop: write a view, let the agent research it, publish the basket, track performance, and rebalance as the story changes.
+
+---
+
+## What we are building
+
+SuperView is a **social investing network for market views**.
+
+| Surface | What you do |
 | --- | --- |
-| Web | Next.js 15 / React 19 on `:3000` |
-| API | Express on `:4000` |
-| Worker | BullMQ on Redis |
-| Data | Prisma + Postgres. Embeddings are JSON arrays + cosine, not pgvector. |
-| Auth | Privy |
-| Chain | Robinhood Chain, 0x, Chainlink, Privy wallet RPC. Reads rotate across official + env + chainlist.org RPCs. |
-| Research | OpenAI (`gpt-4o` / `gpt-4o-mini`) + Anthropic critic. No Parallel. |
-| Quotes | Robinhood RHJ REST every 1s → Redis `quotes:last` → SSE `/v1/stream/prices` |
+| Home / trending | Discover live, benchmarked views from other users |
+| New view | Write one sentence and let the agent build the basket |
+| View page | Thesis, holdings, live vs S&P chart, comments, copy, invest |
+| Portfolio | Track positions, fills, marks, and rebalances |
+| Leaderboard | Rank views by market performance, not follower count |
 
-pnpm + Turborepo. Saans display + Geist body.
+SuperView uses Robinhood Chain stock tokens as the market instrument. These instruments provide economic exposure to listed companies and are handled with jurisdiction and product controls. The default demo flow uses simulated execution against live quotes, while live USDG execution is separately gated.
+
+---
+
+## How a view becomes a book
+
+1. **Write.** A short belief in the user’s own words.
+2. **Interpret.** The agent extracts the economic mechanism, horizon, assumptions, falsifiers, and 3-6 investable angles.
+3. **Retrieve.** It screens the Robinhood Chain catalog, supplements with web discovery, and maps companies back to eligible instruments.
+4. **Diligence.** Each candidate receives research notes and scores for directness, exposure purity, confidence, quality, and risk.
+5. **Construct.** A portfolio manager sizes a 5-12 name basket across direct, indirect, shared-interest, and hedge roles.
+6. **Review.** A separate critic model can approve the basket or force a revision.
+7. **Publish.** The result becomes a social object with a public thesis, holdings, comments, and live vs S&P score.
+8. **Monitor.** The agent continues watching the thesis and can propose trims, additions, exits, or rebalances.
+
+The demo flow emphasizes simulated execution against live quotes. Live USDG execution is wired behind `APP_MODE=live`, the `live_trading` flag, and a Privy wallet signed with a P-256 authorization key.
+
+---
+
+## The agent
+
+The agent is structured as an **investment committee**, not a single prompt.
+
+```
+view
+  -> interpreter       mechanism, horizon, assumptions, falsifiers
+  -> screen/discover   catalog names, web names, universe match
+  -> diligence         company notes and supporting evidence
+  -> analyst           directness, purity, confidence, risk
+  -> portfolio         weights, cash, roles, basket thesis
+  -> critic            approve or revise
+  -> construct         hard constraints and investable book
+  -> monitor           no_change, rebalance, add, trim, exit
+```
+
+**Models (defaults):** `gpt-4o` research, `gpt-4o-mini` fast path, `claude-haiku-4-5` critic and social. Interpreter evals run when `OPENAI_API_KEY` is set.
+
+**Guardrails the model does not get to skip**
+
+- Only names that exist as active Robinhood Chain tokens
+- Halted names excluded
+- Construction: typically 5-12 holdings, issuer / sector / role caps, then equal-weight fallback if a single-theme basket would otherwise die
+- Simulated SELL legs are capped to held quantity; pocket mutations serialize under `FOR UPDATE`
+- View reads: author always; others only `PUBLISHED` and `PUBLIC` or `UNLISTED`
+- Agent memos do not dump prompts or raw JSON into the public thread
+
+---
+
+## Architecture
+
+```
+┌────────────┐     REST + SSE      ┌────────────┐     BullMQ      ┌────────────┐
+│  Next.js   │ ──────────────────► │  Express   │ ──────────────► │   Worker   │
+│  :3000     │   quotes / stream   │  :4000     │                 │  research  │
+│  Vercel    │ ◄──── EventSource ─ │  Railway   │ ◄── Redis ───── │  quotes 1s │
+└────────────┘                     └─────┬──────┘                 │  mark/book │
+                                         │                        └─────┬──────┘
+                                         ▼                              ▼
+                                   Postgres + Prisma              RH REST / RPCs
+                                   (JSON embeddings,              Chainlink, 0x
+                                    cosine, not pgvector)
+```
+
+| Piece | Role |
+| --- | --- |
+| **Web** | Next.js 15 / React 19. Feed, compose, take, pockets, marketing |
+| **API** | Express. Auth (Privy), research jobs, social graph, execution routes, `/v1/stream/prices` |
+| **Worker** | Catalog, 1s Robinhood quotes → Redis `quotes:last`, marks, research pipeline, monitor |
+| **Core** | Basket construction, vs S&P series, simulated ledger, take access |
+| **AI** | Prompts, committee, web research, view guard |
+| **Chain** | Robinhood + chainlist RPC pool, 0x, oracles, Privy signing |
+
+Quotes: RHJ REST every 1s → Redis → poll + SSE. Day change is vs prior cash session close (weekends use Friday vs Thursday, not a flat 0%).
+
+---
 
 ## Repo
 
 ```
-apps/web       SuperView UI (feed, compose, take, portfolio)
-apps/api       REST + SSE
-apps/worker    quotes, valuations, agent jobs, catalog + corporate actions
-packages/core  baskets, series, vs S&P, paper book, serializers
-packages/ai    research, about fill, critic
-packages/db    Prisma schema + seed
-packages/chain Robinhood / 0x / oracles / Privy signing
+apps/web          SuperView UI
+apps/api          REST + SSE
+apps/worker       quotes, research, agent, catalog
+packages/core     books, series, fills, access
+packages/ai       committee + monitor
+packages/db       Prisma + seed
+packages/chain    RH / 0x / oracles / Privy
+packages/config   env
+deploy/railway    Hobby Docker (API + worker)
 ```
 
-## Setup
+pnpm + Turborepo. Typeface: Saans display, Geist body.
+
+---
+
+## Run it locally
 
 ```bash
 pnpm install
 cp .env.example .env
-docker compose up -d
-pnpm db:generate
-pnpm db:migrate
-pnpm db:seed
+docker compose up -d          # Postgres + Redis
+pnpm db:generate && pnpm db:migrate && pnpm db:seed
 pnpm dev
 ```
 
-API: `http://localhost:4000` · Web: `http://localhost:3000`
+- Web: [http://localhost:3000](http://localhost:3000)
+- API: [http://localhost:4000](http://localhost:4000) · `GET /health`
 
-Needed for a useful local run: `OPENAI_API_KEY`. Privy, Anthropic, and 0x are optional until you want login, the critic, or live swaps.
+`OPENAI_API_KEY` is required for a real research run. Privy, Anthropic, and 0x are optional until login, critic review, or live execution. Demo-user fallback is **on in development only**; production stays off unless `ALLOW_DEMO_USER=true`.
 
-## Railway (Hobby)
+```bash
+pnpm spike    # 0x quote, Chainlink NVDA, Privy swap. Missing keys skip.
+pnpm test
+```
 
-Hobby can run the backend. It is usage-billed ($5 plan + $5 included compute). This stack is always-on (1s quote ticks), so expect to spend past the included credit unless you keep replicas tiny.
+---
 
-**Use Docker, not Railpack.** The repo root is a pnpm monorepo with a Next app. Railpack from `/` will try to treat it as the web app. Config lives next to each service and points at `deploy/railway/Dockerfile`.
+## Production shape
 
-Hobby limits that matter: 50 services, 5 GB max volume, 2 custom domains, 8 GB / 8 vCPU per replica. Postgres here does **not** need pgvector.
+| Host | Service |
+| --- | --- |
+| **Vercel** | `apps/web` |
+| **Railway (Hobby)** | Postgres + Redis + one Docker box (`deploy/railway/hobby.toml`) running API + worker |
 
-### Layout
+Use **Docker**, not Railpack (repo root looks like Next.js). Leave Railway **Root Directory** empty. Dockerfile: `deploy/railway/Dockerfile`.
 
-| | Services | When |
-| --- | --- | --- |
-| **Hobby default** | Railway Postgres + Redis + one `backend` service (`hobby.toml`, API+worker) | Stay closest to the $5 credit |
-| Split | Postgres + Redis + `api` + `worker` | If research OOMs the combined box |
+**Vercel**
 
-Keep the Next app on Vercel. Do not deploy `apps/web` on Hobby.
+```
+NEXT_PUBLIC_API_ORIGIN=https://api.yourdomain.com
+NEXT_PUBLIC_PRIVY_APP_ID=
+```
 
-Replica sizes to start: backend (or each of api/worker) **0.5–1 vCPU, 1 GB**. Postgres and Redis at Railway defaults.
-
-### Project setup
-
-1. New Railway project → **Add Postgres** and **Add Redis**.
-2. **New service from this repo.** Leave **Root Directory** empty.
-3. **Config file** = `/deploy/railway/hobby.toml` (combined) or `/apps/api/railway.toml` plus a second service with `/apps/worker/railway.toml`.
-4. Public domain on the API (or combined) service only.
-5. Shared variables (use Railway references, private URLs when both services are in the same project):
+**Railway**
 
 ```
 NODE_ENV=production
 APP_MODE=paper
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 REDIS_URL=${{Redis.REDIS_URL}}
-WEB_ORIGIN=https://your-web.vercel.app
-API_ORIGIN=https://${{RAILWAY_PUBLIC_DOMAIN}}
+WEB_ORIGIN=https://your-app.vercel.app
+API_ORIGIN=https://api.yourdomain.com
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 PRIVY_APP_ID=
@@ -99,22 +182,23 @@ PRIVY_APP_SECRET=
 ADMIN_TOKEN=
 ```
 
-Set `NEXT_PUBLIC_API_ORIGIN` on the web host to the same API URL.
+`API_ORIGIN` must be a real `https://...` URL (not `https://` with an empty host). Railway `PORT` is injected. Do not publish `:4000` on a custom domain. Seed once against the Railway database: `DATABASE_URL=... pnpm db:seed`.
 
-Schema applies on API boot (`prisma db push`). Seed from your machine once, with the Railway `DATABASE_URL`:
+Hobby is usage-billed and this worker ticks quotes every second, so expect to spend past the included credit.
 
-```bash
-pnpm db:seed
-```
+---
 
-Health: `GET /health`. Worker-only services also serve `/health` on `PORT`.
+## What to show judges
 
-Golden interpreter evals call the model when `OPENAI_API_KEY` is set; without a key they skip and the prompt-contract tests still pass.
+1. Write a view from Home or New view. Watch interpret → screen → diligence → basket.
+2. Publish. Open the view: vs S&P, holdings with live last / day change, comments.
+3. Invest in simulation. Confirm the portfolio ledger moved against live quotes.
+4. Trending + leaderboard use the same live mark.
 
-## Day-1 spikes
+The strongest demo is the full simulated investing loop: view, agent, basket, live mark, copied exposure, and rebalance. Live trading is wired and gated, but the submission experience is strongest when the audience can safely see the complete loop.
 
-```bash
-pnpm spike
-```
+---
 
-Runs 0x quote, Chainlink NVDA feed, and Privy sponsored-swap checks. Missing keys skip the related spike instead of failing the rest.
+## Disclaimer
+
+SuperView is a software prototype for researching, publishing, and tracking market views. It is not a broker and does not provide investment advice. Robinhood Chain stock tokens provide economic exposure to listed companies and are subject to availability, jurisdiction, and product restrictions. Simulated balances and performance are for demonstration only.

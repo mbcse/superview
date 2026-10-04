@@ -5,12 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useReducedMotion } from "motion/react";
 import {
   ArrowRight,
-  Check,
   MagnifyingGlass,
   ShareNetwork,
   Scales,
   ShieldCheck,
-  Sparkle,
   X,
   PencilSimple,
   Paperclip,
@@ -29,6 +27,7 @@ import { RadioCard } from "@/components/glass/radio-card";
 import { AgentOrb } from "@/components/glass/agent-orb";
 import { Wordmark } from "@/components/brand";
 import { OrbitField } from "@/components/research/orbit-field";
+import { ResearchLiveLog } from "@/components/research/live-log";
 import { ApiError } from "@/lib/api";
 import { API_ORIGIN } from "@/lib/fmt";
 
@@ -147,8 +146,6 @@ export default function ComposeForm() {
 
   const researching = busy && !holdings.length && !error;
   const idx = useMemo(() => stageIndex(events), [events]);
-  const current = STAGES[Math.min(idx, STAGES.length - 1)] ?? STAGES[0]!;
-  const CurrentIcon = current.icon;
   const shown = Math.min(idx + 1, STAGES.length);
 
   function typeInto(full: string) {
@@ -276,12 +273,11 @@ export default function ComposeForm() {
   }
 
   if (researching) {
-    const Icon = idx >= 4 ? Sparkle : CurrentIcon;
     return (
       <div className="research-dark fixed inset-0 overflow-hidden bg-abyss text-white" id="main">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/research-planet.jpg" alt="" className="absolute inset-0 h-full w-full object-cover object-left" />
-        <div className="absolute inset-0 bg-abyss/30" />
+        <div className="absolute inset-0 bg-gradient-to-b from-abyss/55 via-abyss/25 to-abyss/70" />
         <OrbitField tickers={holdings.map((h) => h.symbol)} />
         <div className="relative flex h-full flex-col px-5 py-6 md:px-10 md:py-8">
           <div className="flex items-center justify-between gap-4">
@@ -290,7 +286,7 @@ export default function ComposeForm() {
                 <span className="absolute inset-0 animate-ping rounded-full bg-aqua/70" />
                 <span className="relative h-2 w-2 rounded-full bg-aqua" />
               </span>
-              SuperView agent is thinking
+              Agent running
             </span>
             <button
               type="button"
@@ -300,42 +296,8 @@ export default function ComposeForm() {
               Cancel
             </button>
           </div>
-          <div className="flex flex-1 items-center justify-end">
-            <div className="w-full max-w-[440px]">
-              <div className="research-enter">
-                <span className="glass-night flex h-11 w-11 items-center justify-center rounded-full">
-                  <Icon className="text-aqua" size={20} />
-                </span>
-                <p className="mt-6 text-[11px] uppercase tracking-[0.08em] text-aqua">
-                  {idx >= 4 ? `${holdings.length || "—"} companies selected` : current.stat}
-                </p>
-                <h1 className="display mt-3 text-[28px] text-white md:text-[36px]">
-                  {idx >= 4 ? "Putting it all together" : current.headline}
-                </h1>
-                <p className="mt-3 text-[15px] text-white/70">
-                  {events[events.length - 1]?.message ||
-                    (idx >= 4 ? "Sizing each role and shaping your basket." : current.sentence)}
-                </p>
-              </div>
-              <ul className="mt-10 space-y-3" aria-label="Research progress">
-                {STAGES.map((s, i) => {
-                  const done = i < idx;
-                  const active = i === idx;
-                  return (
-                    <li key={s.id} className={`flex items-center gap-3 text-[13px] ${done || active ? "text-white" : "text-white/40"}`}>
-                      <span
-                        className={`flex h-5 w-5 items-center justify-center rounded-full border ${
-                          done ? "border-aqua bg-aqua text-abyss" : active ? "border-aqua/70" : "border-white/20"
-                        }`}
-                      >
-                        {done ? <Check size={12} /> : active ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-aqua" /> : null}
-                      </span>
-                      {s.check}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+          <div className="flex min-h-0 flex-1 items-start pt-8 md:pt-14">
+            <ResearchLiveLog events={events} />
           </div>
           <div className="glass-night flex items-center gap-4 rounded-2xl px-5 py-4 md:gap-6">
             <p className="min-w-0 flex-1 truncate text-[15px] font-medium text-white/90">“{sentence.trim()}”</p>
@@ -343,7 +305,7 @@ export default function ComposeForm() {
               <div className="h-full rounded-full bg-lagoon transition-all duration-300" style={{ width: `${Math.min(shown, 4) / 4 * 100}%` }} />
             </div>
             <span className="shrink-0 font-mono text-[13px] text-white/80">
-              {shown} / {STAGES.length}
+              {events.length ? `${events.length} notes` : "waiting"}
             </span>
           </div>
         </div>

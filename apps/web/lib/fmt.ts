@@ -27,6 +27,13 @@ export function fmtUsd(n: number | null | undefined) {
   return `${sign}$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+export function fmtUsdDelta(n: number | null | undefined) {
+  if (n == null || Number.isNaN(n)) return "—";
+  if (Math.abs(n) < 5e-3) return "$0.00";
+  const sign = n > 0 ? "+" : "−";
+  return `${sign}$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export function fmtPooled(n: number | null | undefined) {
   if (n == null || Number.isNaN(n)) return null;
   if (Math.abs(n) >= 10_000) {

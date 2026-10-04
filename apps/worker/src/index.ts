@@ -16,7 +16,9 @@ import {
   QUOTES_CACHE_KEY,
   setPriceAliases,
   lookupPx,
-  lastCashSessionStart
+  lastCashSessionStart,
+  isNyWeekend,
+  prevCloseByTokens
 } from "@takeandstake/core";
 import { describeLlm, enrichStale, isRetryableError, replyToComment, runDailyMonitor, runResearchPipeline, writeManusMemo } from "@takeandstake/ai";
 
@@ -118,21 +120,14 @@ function startOfNyDay(now = Date.now()) {
 
 async function hydratePrevClose() {
   const start = lastCashSessionStart();
-  const rows = await prisma.$queryRaw<Array<{ symbol: string; price: unknown }>>`
-    SELECT t.symbol, s.price
-    FROM "PriceSnapshot" s
-    JOIN "StockToken" t ON t.id = s."tokenId"
-    JOIN (
-      SELECT "tokenId", MAX("observedAt") AS seen
-      FROM "PriceSnapshot"
-      WHERE source = 'RH_REST'::"PriceSource" AND "observedAt" < ${start}
-      GROUP BY "tokenId"
-    ) last ON last."tokenId" = s."tokenId" AND last.seen = s."observedAt"
-    WHERE s.source = 'RH_REST'::"PriceSource"
-  `;
-  for (const r of rows) {
-    const n = Number(r.price);
-    if (Number.isFinite(n)) setPriceAliases(prevClose, String(r.symbol), n);
+  const tokens = await prisma.stockToken.findMany({
+    where: { chainId: 4663 },
+    select: { id: true, symbol: true }
+  });
+  const closes = await prevCloseByTokens(tokens);
+  for (const t of tokens) {
+    const px = closes.get(t.id);
+    if (px != null) setPriceAliases(prevClose, t.symbol, px);
   }
   log("worker", "prevclose", { n: prevClose.size, from: start.toISOString() });
 }
@@ -147,7 +142,7 @@ hushLocks(
       try {
         const day = nyDay();
         if (day !== sessionDay) {
-          if (lastMids.size) {
+          if (lastMids.size && !isNyWeekend()) {
             for (const [k, v] of lastMids) setPriceAliases(prevClose, k, v);
           }
           sessionOpen.clear();

@@ -20,7 +20,10 @@ export function mergeQuote(prev: LiveQuote | undefined, next: LiveQuote): { quot
   const bookChanged = prev.bid !== next.bid || prev.ask !== next.ask;
   if (!lastChanged && !chgChanged && !bookChanged) return { quote: prev, changed: false };
   const dir = lastChanged ? (next.last > prev.last ? "up" : "down") : (prev.dir ?? null);
-  return { quote: { ...next, dir, seq: lastChanged ? (prev.seq ?? 0) + 1 : (prev.seq ?? 1) }, changed: true };
+  return {
+    quote: { ...next, dir, seq: lastChanged || chgChanged ? (prev.seq ?? 0) + 1 : (prev.seq ?? 1) },
+    changed: true
+  };
 }
 
 type Listener = () => void;

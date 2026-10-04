@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import { fmtPx, fmtPct, tick } from "@/lib/fmt";
+import { fmtPx, fmtPct, fmtUsdDelta, tick } from "@/lib/fmt";
 import { cn } from "@/lib/cn";
 import { RoleChip } from "@/components/social/role-chip";
 import { useLiveQuote } from "@/components/social/price-stream";
@@ -13,6 +13,7 @@ export function HoldingRow({
   weightBps,
   last,
   chgPct,
+  pnlUsd,
   rationale,
   role,
   logoUrl,
@@ -24,6 +25,7 @@ export function HoldingRow({
   weightBps: number;
   last?: number | null;
   chgPct?: number | null;
+  pnlUsd?: number | null;
   rationale?: string;
   role?: string;
   logoUrl?: string | null;
@@ -93,6 +95,15 @@ export function HoldingRow({
         ) : (
           <span className="num text-[14px]">{pct.toFixed(1)}%</span>
         )}
+        {pnlUsd != null ? (
+          <TickValue
+            value={pnlUsd}
+            format={fmtUsdDelta}
+            pulse={live?.seq}
+            color="sign"
+            className="mt-0.5 block text-[11px]"
+          />
+        ) : null}
         {confidence != null ? (
           <p className="mt-0.5 text-right text-[11px] text-muted">{Math.round(confidence * 100)}%</p>
         ) : null}

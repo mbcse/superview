@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeTone, fmtAgo, fmtPct, fmtUsd } from "./fmt";
+import { changeTone, fmtAgo, fmtPct, fmtUsd, fmtUsdDelta } from "./fmt";
 import { loginHref, requiresAuth } from "./auth-paths";
 import { proposalLine, decisionLabel } from "./agent-copy";
 
@@ -12,6 +12,8 @@ describe("fmt", () => {
     expect(fmtPct(0.0123)).toBe("+1.23%");
     expect(fmtPct(-0.02)).toBe("−2.00%");
     expect(fmtPct(-1.5e-16)).toBe("0.00%");
+    expect(fmtUsdDelta(-1.88)).toBe("−$1.88");
+    expect(fmtUsdDelta(10)).toBe("+$10.00");
     expect(changeTone(-1)).toBe("down");
   });
   it("formats relative time", () => {

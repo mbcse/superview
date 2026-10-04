@@ -7,8 +7,8 @@ import dynamic from "next/dynamic";
 import { useAuthedFetch } from "@/components/use-authed-fetch";
 import { Button } from "@/components/ui/button";
 import { Chip, Notice, Surface } from "@/components/ui/surface";
-import { API_ORIGIN, fmtPooled, fmtUsd, fmtVs } from "@/lib/fmt";
-import { fmtVsLabel, useLiveVsSpy } from "@/lib/live-vs";
+import { API_ORIGIN, fmtPooled, fmtPct, fmtUsd, fmtUsdDelta, fmtVs } from "@/lib/fmt";
+import { fmtVsLabel, useLiveBook } from "@/lib/live-vs";
 import { ApiError } from "@/lib/api";
 import { decisionLabel } from "@/lib/agent-copy";
 import { HoldingRow } from "@/components/data/holding-row";
@@ -86,7 +86,19 @@ function SaveToCollection({
   );
 }
 
-function LiveHolding({ h, takeId }: { h: any; takeId: string }) {
+function bare(symbol?: string | null) {
+  return String(symbol ?? "").replace(/^RH/, "").toUpperCase();
+}
+
+function LiveHolding({
+  h,
+  takeId,
+  pnlUsd
+}: {
+  h: any;
+  takeId: string;
+  pnlUsd?: number | null;
+}) {
   const q = useLiveQuote(h.token?.symbol);
   const score = h.score ?? {};
   return (
@@ -95,12 +107,52 @@ function LiveHolding({ h, takeId }: { h: any; takeId: string }) {
       weightBps={h.weightBps}
       last={q?.last ?? h.last}
       chgPct={q?.chgPct ?? h.chgPct}
+      pnlUsd={pnlUsd}
       rationale={h.rationale}
       role={h.role ?? score.role}
       logoUrl={h.token?.logoUrl}
       takeId={takeId}
       whyInBasket={score.whyInBasket ?? h.rationale}
     />
+  );
+}
+
+function StakeMark({
+  investedUsd,
+  valueUsd,
+  pnlUsd,
+  displayPct,
+  sinceInvested,
+  seq
+}: {
+  investedUsd: number;
+  valueUsd: number | null;
+  pnlUsd: number | null;
+  displayPct: number | null;
+  sinceInvested: boolean;
+  seq: number;
+}) {
+  return (
+    <div>
+      <TickValue
+        value={valueUsd ?? investedUsd}
+        format={fmtUsd}
+        pulse={seq}
+        color="none"
+        className="figure text-[28px] text-ink"
+      />
+      <p className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <TickValue value={pnlUsd} format={fmtUsdDelta} pulse={seq} color="sign" className="font-mono text-[13px]" />
+        <TickValue value={displayPct} format={fmtPct} pulse={seq} color="sign" className="font-mono text-[13px]" />
+      </p>
+      <p className="mt-2 flex items-center gap-1.5 font-mono text-[13px] text-muted">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inset-0 animate-ping rounded-full bg-aqua/70" />
+          <span className="relative h-1.5 w-1.5 rounded-full bg-aqua" />
+        </span>
+        {sinceInvested ? `your ${fmtUsd(investedUsd)} · since invested` : `your ${fmtUsd(investedUsd)} · today`}
+      </p>
+    </div>
   );
 }
 
@@ -132,12 +184,15 @@ export default function TakeClient({ data }: { data: any }) {
     last: contrib.find((c) => c.tokenId === h.tokenId)?.last ?? null,
     publish: contrib.find((c) => c.tokenId === h.tokenId)?.publish ?? null
   }));
-  const vs = useLiveVsSpy(vsHoldings, {
+  const book = useLiveBook(vsHoldings, {
     spyPublish,
     storedBenchmark: val ? Number(val.benchmarkIndex) : null,
-    fallback: storedVs
+    fallback: storedVs,
+    investedUsd: myUsd
   });
+  const vs = book.vs;
   const summary = vs == null ? "No mark vs S&P 500 yet." : `${fmtVs(vs)} vs S&P 500.`;
+  const legPnl = new Map(book.legs.map((l) => [bare(l.symbol), l.pnlUsd]));
   const research = rev?.researchRun;
   const authorName = take.author?.displayName ?? take.author?.handle ?? "Member";
   const candidates = research?.candidates ?? [];
@@ -247,10 +302,21 @@ export default function TakeClient({ data }: { data: any }) {
           <AgentOrb size={14} /> Agent watching
         </p>
         <div className="mt-6 flex flex-wrap items-end justify-between gap-6 border-y border-teal/10 py-6">
+          {myUsd != null ? (
+            <StakeMark
+              investedUsd={myUsd}
+              valueUsd={book.valueUsd}
+              pnlUsd={book.pnlUsd}
+              displayPct={book.displayPct}
+              sinceInvested={book.sinceInvested}
+              seq={book.seq}
+            />
+          ) : null}
           <div>
             <TickValue
               value={vs}
               format={(n) => fmtVsLabel(n, 2)}
+              pulse={vs != null && Math.abs(vs) >= 0.005 ? book.seq : undefined}
               color="sign"
               className="figure text-[28px]"
             />
@@ -312,7 +378,12 @@ export default function TakeClient({ data }: { data: any }) {
         <h2 className="display text-[20px] text-ink">Basket</h2>
         <div className="mt-2">
           {basket.map((h: any) => (
-            <LiveHolding key={h.id ?? h.tokenId} h={h} takeId={take.id} />
+            <LiveHolding
+              key={h.id ?? h.tokenId}
+              h={h}
+              takeId={take.id}
+              pnlUsd={myUsd != null ? (legPnl.get(bare(h.token?.symbol)) ?? null) : null}
+            />
           ))}
         </div>
       </Surface>

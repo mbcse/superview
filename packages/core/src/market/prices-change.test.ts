@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayChangePct, inheritAliasChg, lastCashSessionStart, lookupPx, setPriceAliases } from "./prices.js";
+import { dayChangePct, inheritAliasChg, isNyWeekend, lastCashSessionStart, lookupPx, sessionLast, setPriceAliases } from "./prices.js";
 
 describe("day change", () => {
   it("uses previous close, not a same-print zero", () => {
@@ -28,6 +28,33 @@ describe("day change", () => {
     }).format(start);
     expect(day).toMatch(/Fri/);
     expect(day).toMatch(/2026-10-02/);
+  });
+
+  it("does not treat Sunday as a cash session", () => {
+    expect(isNyWeekend(Date.parse("2026-10-04T16:00:00.000Z"))).toBe(true);
+    expect(isNyWeekend(Date.parse("2026-10-02T16:00:00.000Z"))).toBe(false);
+  });
+
+  it("clamps a weekend book that printed outside the day range", () => {
+    expect(
+      sessionLast({
+        mid: 249.7,
+        bid: 229.4,
+        ask: 270,
+        high: 238.98,
+        low: 233.11,
+        fallback: 235
+      })
+    ).toBeCloseTo(238.98);
+    expect(
+      sessionLast({
+        mid: 232.97,
+        bid: 231.71,
+        ask: 234.23,
+        high: 237.87,
+        low: 231.16
+      })
+    ).toBeCloseTo(232.97);
   });
 
   it("copies a real change onto a new alias that printed 0", () => {
