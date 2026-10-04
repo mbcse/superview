@@ -46,10 +46,29 @@ function pid(req: Request, key: string) {
   return Array.isArray(v) ? v[0] ?? "" : v ?? "";
 }
 
+function webOrigins(primary: string) {
+  const allowed = new Set<string>();
+  for (const raw of primary.split(",")) {
+    const origin = raw.trim().replace(/\/$/, "");
+    if (!origin) continue;
+    allowed.add(origin);
+    try {
+      const url = new URL(origin);
+      const host = url.hostname.startsWith("www.") ? url.hostname.slice(4) : url.hostname;
+      const port = url.port ? `:${url.port}` : "";
+      allowed.add(`${url.protocol}//${host}${port}`);
+      allowed.add(`${url.protocol}//www.${host}${port}`);
+    } catch {
+      /* keep the raw origin */
+    }
+  }
+  return [...allowed];
+}
+
 const env = loadEnv();
 export const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: env.WEB_ORIGIN, credentials: true }));
+app.use(cors({ origin: webOrigins(env.WEB_ORIGIN), credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use((req, res, next) => {
   const quiet =
