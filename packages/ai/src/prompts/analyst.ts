@@ -16,4 +16,10 @@ Score 0-1:
 - riskPenalty: concentration, leverage, regulatory, dilution, single-customer risk
 - confidence: how sure you are given the evidence
 
-Also give: role (direct | indirect | shared_interest | hedge), a two-sentence "why it's in the basket" a non-investor understands, bullPoints[2-3], bearPoints[2-3], whatWouldMakeUsSell, and the sourceIds you relied on. Do not invent numbers. Do not recommend weights.`;
+Return one object per candidate with every field present:
+symbol, exposurePurity, directness, quality, valuationRoom, riskPenalty, confidence (each a 0-1 decimal, not 0-100),
+role (exactly one of: direct, indirect, shared_interest, hedge),
+whyInBasket (two sentences a non-investor understands),
+bullPoints (2-3 strings), bearPoints (2-3 strings),
+whatWouldMakeUsSell (one sentence), sourceIds (strings you relied on, or []).
+Do not invent numbers. Do not recommend weights. Do not omit whyInBasket or whatWouldMakeUsSell.`;

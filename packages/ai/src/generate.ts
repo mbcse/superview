@@ -57,6 +57,46 @@ function holdingWeight(row: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function unitScore(value: unknown, fallback = 0.5) {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  if (n > 1 && n <= 100) return Math.min(1, Math.max(0, n / 100));
+  return Math.min(1, Math.max(0, n));
+}
+
+function asStringList(value: unknown, max = 6) {
+  if (Array.isArray(value)) return value.map((x) => String(x).trim()).filter(Boolean).slice(0, max);
+  if (typeof value === "string" && value.trim()) return [value.trim()].slice(0, max);
+  return [];
+}
+
+function asText(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function repairAnalystItem(row: unknown) {
+  if (!row || typeof row !== "object") return row;
+  const o = row as Record<string, unknown>;
+  const symbol = asText(o.symbol, "");
+  if (!symbol) return null;
+  return {
+    ...o,
+    symbol,
+    exposurePurity: unitScore(o.exposurePurity),
+    directness: unitScore(o.directness),
+    quality: unitScore(o.quality),
+    valuationRoom: unitScore(o.valuationRoom),
+    riskPenalty: unitScore(o.riskPenalty, 0.4),
+    confidence: unitScore(o.confidence),
+    role: typeof o.role === "string" && RINGS.has(o.role) ? o.role : typeof o.ring === "string" && RINGS.has(o.ring) ? o.ring : "indirect",
+    whyInBasket: asText(o.whyInBasket ?? o.why ?? o.rationale ?? o.reason, `${symbol} fits the view.`),
+    bullPoints: asStringList(o.bullPoints),
+    bearPoints: asStringList(o.bearPoints),
+    whatWouldMakeUsSell: asText(o.whatWouldMakeUsSell ?? o.sellTrigger ?? o.exit, "The thesis no longer holds."),
+    sourceIds: asStringList(o.sourceIds, 12)
+  };
+}
+
 export function repairLlmValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(repairLlmValue);
   if (value && typeof value === "object") {
@@ -70,6 +110,9 @@ export function repairLlmValue(value: unknown): unknown {
         const w = holdingWeight(row);
         return w !== undefined && w >= 1;
       });
+    }
+    if (Array.isArray(out.items) && out.items.some((row) => row && typeof row === "object" && "symbol" in (row as object))) {
+      out.items = out.items.map(repairAnalystItem).filter(Boolean);
     }
     return out;
   }
