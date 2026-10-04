@@ -12,7 +12,10 @@ export function useTickFlash(value: number | null | undefined, pulse?: number | 
   const prevPulse = useRef<number | null>(null);
 
   useEffect(() => {
-    if (value == null || Number.isNaN(value)) return;
+    if (value == null || Number.isNaN(value)) {
+      prevPulse.current = pulse ?? null;
+      return;
+    }
     const moved = prev.current != null && value !== prev.current;
     const pulsed = pulse != null && prevPulse.current != null && pulse !== prevPulse.current;
     if (!moved && !pulsed) {
@@ -26,7 +29,7 @@ export function useTickFlash(value: number | null | undefined, pulse?: number | 
     if (reduce) return;
     setFlash(dir);
     setGen((g) => g + 1);
-    const t = window.setTimeout(() => setFlash(null), 640);
+    const t = window.setTimeout(() => setFlash(null), 420);
     return () => window.clearTimeout(t);
   }, [value, pulse, reduce]);
 

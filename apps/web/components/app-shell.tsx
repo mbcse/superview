@@ -192,13 +192,7 @@ function NavRail({ className = "" }: { className?: string }) {
       <div className="flex flex-col gap-1">
         <RailLink href="/app" label="Home" icon={House} exact />
         <RailLink href="/app/trending" label="Trending" icon={TrendUp} />
-        <Link
-          href="/app/compose"
-          className="bg-lagoon my-2 inline-flex h-12 w-full items-center justify-start gap-2 rounded-full px-4 text-[15px] font-medium text-white shadow-[0_10px_24px_-12px_rgba(14,116,144,0.6)] hover:brightness-110"
-        >
-          <Plus size={18} />
-          New view
-        </Link>
+        <RailLink href="/app/compose" label="New view" icon={Plus} />
         <RailLink href="/app/pockets" label="Portfolio" icon={ChartPie} />
         <RailLink href="/app/profile" label="Profile" icon={User} />
       </div>
@@ -306,6 +300,7 @@ function BottomTab({
   return (
     <Link
       href={href}
+      aria-current={on ? "page" : undefined}
       className={`flex flex-1 flex-col items-center gap-1 py-2 text-[11px] font-medium ${on ? "text-ink" : "text-muted"}`}
     >
       <Icon size={20} weight={on ? "fill" : "regular"} className={on ? "text-teal" : ""} />
@@ -315,6 +310,8 @@ function BottomTab({
 }
 
 function BottomNav({ className = "" }: { className?: string }) {
+  const path = usePathname();
+  const composing = path.startsWith("/app/compose");
   return (
     <nav aria-label="Primary" className={`fixed inset-x-3 bottom-3 z-40 ${className}`}>
       <div className="glass-chrome flex h-16 items-center rounded-[28px] px-2 pb-[env(safe-area-inset-bottom)]">
@@ -324,9 +321,14 @@ function BottomNav({ className = "" }: { className?: string }) {
           <Link
             href="/app/compose"
             aria-label="New view"
-            className="-mt-8 flex h-14 w-14 items-center justify-center rounded-full bg-lagoon text-white shadow-[0_10px_24px_-12px_rgba(14,116,144,0.6)] ring-4 ring-canvas"
+            aria-current={composing ? "page" : undefined}
+            className={
+              composing
+                ? "-mt-8 flex h-14 w-14 items-center justify-center rounded-full bg-lagoon text-white shadow-[0_10px_24px_-12px_rgba(14,116,144,0.6)] ring-4 ring-canvas"
+                : "-mt-8 flex h-14 w-14 items-center justify-center rounded-full bg-mist text-ink ring-4 ring-canvas"
+            }
           >
-            <Plus size={24} />
+            <Plus size={24} weight={composing ? "bold" : "regular"} />
           </Link>
         </div>
         <BottomTab href="/app/pockets" label="Portfolio" icon={ChartPie} />

@@ -3,6 +3,8 @@ import { PrivyClient } from "@privy-io/server-auth";
 import { loadEnv } from "@takeandstake/config";
 import { prisma } from "@takeandstake/db";
 import { handleFromPrivyId } from "../auth-handle.js";
+import { assertWalletAssignable, isHexAddress, verifiedWalletId } from "../wallet-bind.js";
+import { verifySharedSecret, verifySvixSignature } from "../webhook-auth.js";
 
 const env = loadEnv();
 
@@ -38,22 +40,31 @@ async function lookupPrivyWalletId(privyId: string, address?: string) {
   if (!sdk) return undefined;
   try {
     const user = await sdk.getUser(privyId);
-    const accounts = Array.isArray((user as { linkedAccounts?: unknown }).linkedAccounts)
-      ? (user as { linkedAccounts: Array<Record<string, unknown>> }).linkedAccounts
-      : [];
+    const accounts = Array.isArray(user.linkedAccounts) ? user.linkedAccounts : [];
     const wallets = accounts.filter((a) => a.type === "wallet" || a.type === "smart_wallet");
     const hit = address
       ? wallets.find((w) => String(w.address ?? "").toLowerCase() === address.toLowerCase())
       : wallets[0];
-    return typeof hit?.id === "string" ? hit.id : undefined;
+    const id = hit && typeof (hit as { id?: unknown }).id === "string" ? (hit as { id: string }).id : undefined;
+    return id;
   } catch {
     return undefined;
   }
 }
 
+export class WalletBindError extends Error {
+  status: number;
+  code: string;
+  constructor(code: "wallet_bound" | "wallet_mismatch" | "unverified_wallet", status = 409) {
+    super(code);
+    this.code = code;
+    this.status = status;
+  }
+}
+
 export async function upsertPrivyUser(
   privyId: string,
-  extras?: { displayName?: string; walletAddress?: string; privyWalletId?: string }
+  extras?: { displayName?: string; walletAddress?: string }
 ) {
   const existing = await prisma.user.findUnique({ where: { privyId } });
   const user =
@@ -69,24 +80,31 @@ export async function upsertPrivyUser(
   if (extras?.displayName && extras.displayName !== user.displayName) {
     await prisma.user.update({ where: { id: user.id }, data: { displayName: extras.displayName } });
   }
-  if (extras?.walletAddress && /^0x[0-9a-fA-F]{40}$/.test(extras.walletAddress)) {
-    const privyWalletId = (await lookupPrivyWalletId(privyId, extras.walletAddress)) ?? extras.privyWalletId;
-    await prisma.wallet.upsert({
-      where: { address_chainId: { address: extras.walletAddress, chainId: 4663 } },
-      update: {
-        userId: user.id,
-        isPrimary: true,
-        ...(privyWalletId ? { privyWalletId } : {})
-      },
-      create: {
-        userId: user.id,
-        address: extras.walletAddress,
-        type: "EMBEDDED",
-        chainId: 4663,
-        isPrimary: true,
-        privyWalletId
-      }
+  if (extras?.walletAddress && isHexAddress(extras.walletAddress)) {
+    const privyWalletId = verifiedWalletId(await lookupPrivyWalletId(privyId, extras.walletAddress));
+    if (!privyWalletId) throw new WalletBindError("unverified_wallet", 400);
+    const row = await prisma.wallet.findUnique({
+      where: { address_chainId: { address: extras.walletAddress, chainId: 4663 } }
     });
+    const allowed = assertWalletAssignable(row, user.id, privyWalletId);
+    if (!allowed.ok) throw new WalletBindError(allowed.error);
+    if (row) {
+      await prisma.wallet.update({
+        where: { id: row.id },
+        data: { privyWalletId, isPrimary: true }
+      });
+    } else {
+      await prisma.wallet.create({
+        data: {
+          userId: user.id,
+          address: extras.walletAddress,
+          type: "EMBEDDED",
+          chainId: 4663,
+          isPrimary: true,
+          privyWalletId
+        }
+      });
+    }
   }
   return prisma.user.findUniqueOrThrow({ where: { id: user.id }, include: { wallets: true } });
 }
@@ -139,7 +157,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     if (!user) return res.status(401).json({ error: "unauthorized" });
     req.user = user;
     next();
-  } catch {
+  } catch (err) {
+    if (err instanceof WalletBindError) return res.status(err.status).json({ error: err.code });
     return res.status(401).json({ error: "invalid_token" });
   }
 }
@@ -165,10 +184,16 @@ export async function requireTakeAuthor(userId: string, takeId: string) {
   return { ok: true as const, take };
 }
 
-export async function verifyPrivyWebhook(req: Request) {
-  const sdk = client();
-  if (!sdk) return true;
-  const signature = req.header("svix-signature") ?? req.header("privy-signature") ?? "";
-  if (!signature) return false;
-  return true;
+export async function verifyPrivyWebhook(req: Request, rawBody?: string) {
+  return verifySvixSignature({
+    secret: process.env.PRIVY_WEBHOOK_SECRET ?? "",
+    id: req.header("svix-id") ?? "",
+    timestamp: req.header("svix-timestamp") ?? "",
+    signatureHeader: req.header("svix-signature") ?? req.header("privy-signature") ?? "",
+    body: rawBody ?? JSON.stringify(req.body ?? {})
+  });
+}
+
+export function verifyAlchemyWebhook(req: Request) {
+  return verifySharedSecret(req.header("x-alchemy-token") ?? "", process.env.ALCHEMY_WEBHOOK_TOKEN);
 }

@@ -30,19 +30,23 @@ export function canonicalPrivyPayload(input: Omit<PrivySignInput, "authorization
   });
 }
 
+function utf8(value: string) {
+  return Uint8Array.from(Buffer.from(value, "utf8"));
+}
+
 export function privyAuthorizationSignature(input: PrivySignInput) {
   const payload = canonicalPrivyPayload(input);
   const pem = authorizationPem(input.authorizationKey);
   const key = createPrivateKey({ key: pem, format: "pem" });
-  const signature = nodeSign("SHA256", Buffer.from(payload), { key, dsaEncoding: "der" });
-  return signature.toString("base64");
+  const signature = nodeSign("SHA256", utf8(payload), { key, dsaEncoding: "der" });
+  return Buffer.from(new Uint8Array(signature)).toString("base64");
 }
 
 export function verifyPrivyAuthorizationSignature(input: PrivySignInput, signatureB64: string) {
   const payload = canonicalPrivyPayload(input);
   const pem = authorizationPem(input.authorizationKey);
   const key = createPrivateKey({ key: pem, format: "pem" });
-  return nodeVerify("SHA256", Buffer.from(payload), { key, dsaEncoding: "der" }, Buffer.from(signatureB64, "base64"));
+  return nodeVerify("SHA256", utf8(payload), { key, dsaEncoding: "der" }, Uint8Array.from(Buffer.from(signatureB64, "base64")));
 }
 
 export function assertNotRawAuthorizationKey(signature: string, authorizationKey: string) {

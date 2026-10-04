@@ -64,7 +64,11 @@ export function ViewCommentsList({
 
   const load = useCallback(async () => {
     const d = await fetchApi<{ comments: ViewComment[] }>(`/v1/takes/${takeId}/comments`);
-    setComments((d.comments ?? []).filter((c) => !/invalid token|"code"\s*:\s*16/i.test(c.body)));
+    setComments(
+      (d.comments ?? []).filter(
+        (c) => !/invalid token|"code"\s*:\s*16|Write an investment memo|You are the agent that runs this view|Comment to reply to:|\{\{view\}\}/i.test(c.body)
+      )
+    );
   }, [fetchApi, takeId]);
 
   useEffect(() => {

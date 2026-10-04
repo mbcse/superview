@@ -17,6 +17,7 @@ import {
   formatUnits,
   type Address
 } from "@takeandstake/chain";
+import { grantAllows } from "../wallet-bind.js";
 
 function isHexAddress(addr: string) {
   return /^0x[0-9a-fA-F]{40}$/.test(addr);
@@ -117,6 +118,7 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string, 
   if (!wallet?.privyWalletId) return { error: "no_wallet" as const };
   const grant = wallet.signerGrants.find((g) => !g.revokedAt && g.expiresAt > new Date());
   if (!grant) return { error: "no_grant" as const };
+  if (grant.privySignerId !== wallet.privyWalletId) return { error: "grant_mismatch" as const };
 
   const target = pocket.take.revisions[0]?.target;
   if (!target) return { error: "no_target" as const };
@@ -133,14 +135,10 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string, 
   todayStart.setUTCHours(0, 0, 0, 0);
   const priorLegs = await prisma.orderLeg.findMany({
     where: {
-      order: { pocketId: pocket.id, mode: "LIVE", createdAt: { gte: todayStart }, status: { in: ["FILLED", "PARTIAL", "SUBMITTED"] } }
+      order: { pocketId: pocket.id, mode: "LIVE", createdAt: { gte: todayStart }, status: { in: ["FILLED", "PARTIAL", "SUBMITTING"] } }
     }
   });
   let spentToday = priorLegs.reduce((s, l) => s + Number(l.sellAmount) / 1e6, 0);
-  const allowed = new Set(
-    (Array.isArray(grant.allowedContracts) ? (grant.allowedContracts as string[]) : []).map((c) => c.toLowerCase())
-  );
-
   const order = await prisma.order.create({
     data: { pocketId: pocket.id, mode: "LIVE", kind: "INVEST", status: "SUBMITTING", idempotencyKey }
   });
@@ -208,7 +206,7 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string, 
       }
       const spender = quote.issues?.allowance?.spender;
       if (spender) {
-        if (allowed.size && !allowed.has(spender.toLowerCase())) {
+        if (!grantAllows(grant.allowedContracts, spender)) {
           skipped += 1;
           await prisma.orderLeg.update({ where: { id: leg.id }, data: { status: "SKIPPED", skipReason: "spender_not_allowed" } });
           legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "spender_not_allowed" });
@@ -233,7 +231,7 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string, 
         });
       }
       if (!quote.transaction) throw new Error("no_tx");
-      if (allowed.size && !allowed.has(quote.transaction.to.toLowerCase())) {
+      if (!grantAllows(grant.allowedContracts, quote.transaction.to)) {
         skipped += 1;
         await prisma.orderLeg.update({ where: { id: leg.id }, data: { status: "SKIPPED", skipReason: "router_not_allowed" } });
         legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "router_not_allowed" });

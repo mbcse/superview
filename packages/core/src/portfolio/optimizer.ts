@@ -85,7 +85,7 @@ export function constructPortfolio(
 
   weights = weights.filter((w) => w.weightBps >= MIN_HOLDING_BPS);
   if (weights.length < MIN_HOLDINGS) {
-    return { ok: false, code: "INSUFFICIENT_ELIGIBLE_EXPOSURE", coverage: {} };
+    return themeEqualWeight(picked, cash);
   }
 
   const directSum = weights.filter((w) => w.role === "direct").reduce((s, w) => s + w.weightBps, 0);
@@ -109,7 +109,7 @@ export function constructPortfolio(
   }
   weights = weights.filter((w) => w.weightBps >= MIN_HOLDING_BPS);
   if (weights.length < MIN_HOLDINGS) {
-    return { ok: false, code: "INSUFFICIENT_ELIGIBLE_EXPOSURE", coverage: {} };
+    return themeEqualWeight(picked, cash);
   }
 
   const holdingSum = weights.reduce((s, w) => s + w.weightBps, 0);
@@ -133,6 +133,34 @@ export function constructPortfolio(
       score: w.score,
       role: w.role
     }))
+  };
+}
+
+function themeEqualWeight(
+  picked: Array<Candidate & { role: HoldingRole; score: number }>,
+  cash: number
+): ConstructionResult {
+  const take = picked.slice(0, Math.min(MAX_HOLDINGS, picked.length));
+  const investable = TOTAL_BPS - cash;
+  const each = Math.floor(investable / take.length);
+  const holdings = take.map((c) => ({
+    tokenId: c.tokenId,
+    symbol: c.symbol,
+    actionId: c.actionId,
+    weightBps: each,
+    score: c.score,
+    role: c.role
+  }));
+  const holdingSum = each * take.length;
+  return {
+    ok: true,
+    cashBps: Math.min(1_000, Math.max(0, TOTAL_BPS - holdingSum)),
+    diffs: holdings.map((h) => ({
+      symbol: h.symbol,
+      proposedBps: h.weightBps,
+      finalBps: h.weightBps
+    })),
+    holdings
   };
 }
 

@@ -7,7 +7,7 @@ import {
   readAggregator
 } from "@takeandstake/chain";
 import { log, logError } from "@takeandstake/shared";
-import { ingestRobinhoodPrices, latestPrices, liveQuoteForToken, type LiveQuote } from "../market/prices.js";
+import { ingestRobinhoodPrices, latestPrices, liveQuoteForToken, prevCloseByTokens, type LiveQuote } from "../market/prices.js";
 import { backingPrivacy } from "../social/backing.js";
 import { asNum, asSharePrice, unitsToQty, weightedBookIndex, type HoldingContribution } from "./mark.js";
 import { buildTakeSeries, rangeSince } from "./series.js";
@@ -111,7 +111,8 @@ export async function listQuotes(symbols?: string[]): Promise<QuoteRow[]> {
     where = { chainId: 4663, symbol: { in: [...expanded] } };
   }
   const tokens = await prisma.stockToken.findMany({ where });
-  return Promise.all(tokens.map((t) => quoteForToken(t)));
+  const closes = await prevCloseByTokens(tokens);
+  return Promise.all(tokens.map((t) => liveQuoteForToken(t, closes.get(t.id) ?? null)));
 }
 
 export async function markPublishedTakes(liveLast?: Map<string, number>, liveToken?: Map<string, number>) {
@@ -353,6 +354,7 @@ export async function buildLiveBoard() {
 export function serializeFeedTake(t: {
   id: string;
   createdAt: Date;
+  seeded?: boolean;
   author: { handle: string };
   revisions: Array<{
     sentence: string;
@@ -390,6 +392,7 @@ export function serializeFeedTake(t: {
   );
   return {
     id: t.id,
+    seeded: Boolean(t.seeded),
     sentence: rev?.sentence,
     author: t.author.handle,
     createdAt: t.createdAt instanceof Date ? t.createdAt.toISOString() : String(t.createdAt),

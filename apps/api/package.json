@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "tsx watch --env-file=../../.env src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "test": "tsx --test src/auth-handle.test.ts"
+    "start": "tsx src/index.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/auth-handle.test.ts src/wallet-bind.test.ts src/webhook-auth.test.ts src/take-access.test.ts"
   },
   "dependencies": {
     "@privy-io/server-auth": "^1.32.5",
@@ -23,13 +24,13 @@
     "ioredis": "^5.4.2",
     "bullmq": "^5.34.5",
     "pino": "^9.6.0",
-    "pino-http": "^10.4.0"
+    "pino-http": "^10.4.0",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
 }

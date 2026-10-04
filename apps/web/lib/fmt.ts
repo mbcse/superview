@@ -1,5 +1,6 @@
 export function fmtPct(n: number | null | undefined) {
   if (n == null || Number.isNaN(n)) return "—";
+  if (Math.abs(n) < 5e-7) return "0.00%";
   const sign = n > 0 ? "+" : n < 0 ? "−" : "";
   return `${sign}${Math.abs(n * 100).toFixed(2)}%`;
 }

@@ -13,6 +13,7 @@ export type RunCheckpoint = {
   diligence?: Record<string, string>;
   analystItems?: AnalystItem[];
   pm?: PortfolioManagerOut;
+  critic?: CriticOut;
   skipParallel?: boolean;
 };
 

@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { Queue, UnrecoverableError, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { loadEnv } from "@takeandstake/config";
@@ -12,7 +13,10 @@ import {
   markPublishedTakes,
   syncRobinhoodCatalog,
   syncCorporateActions,
-  QUOTES_CACHE_KEY
+  QUOTES_CACHE_KEY,
+  setPriceAliases,
+  lookupPx,
+  lastCashSessionStart
 } from "@takeandstake/core";
 import { describeLlm, enrichStale, isRetryableError, replyToComment, runDailyMonitor, runResearchPipeline, writeManusMemo } from "@takeandstake/ai";
 
@@ -113,7 +117,7 @@ function startOfNyDay(now = Date.now()) {
 }
 
 async function hydratePrevClose() {
-  const start = startOfNyDay();
+  const start = lastCashSessionStart();
   const rows = await prisma.$queryRaw<Array<{ symbol: string; price: unknown }>>`
     SELECT t.symbol, s.price
     FROM "PriceSnapshot" s
@@ -128,7 +132,7 @@ async function hydratePrevClose() {
   `;
   for (const r of rows) {
     const n = Number(r.price);
-    if (Number.isFinite(n)) prevClose.set(String(r.symbol).toUpperCase(), n);
+    if (Number.isFinite(n)) setPriceAliases(prevClose, String(r.symbol), n);
   }
   log("worker", "prevclose", { n: prevClose.size, from: start.toISOString() });
 }
@@ -144,18 +148,16 @@ hushLocks(
         const day = nyDay();
         if (day !== sessionDay) {
           if (lastMids.size) {
-            for (const [k, v] of lastMids) prevClose.set(k, v);
+            for (const [k, v] of lastMids) setPriceAliases(prevClose, k, v);
           }
           sessionOpen.clear();
           sessionDay = day;
         }
-        const prior = prevClose.size ? prevClose : sessionOpen;
-        const rh = await ingestRobinhoodPrices({ persist: false, prior });
+        const rh = await ingestRobinhoodPrices({ persist: false, prior: prevClose });
         for (const q of rh.payload) {
-          const k = q.symbol.toUpperCase();
-          lastMids.set(k, q.last);
-          if (q.tokenLast != null) lastTokens.set(k, q.tokenLast);
-          if (!sessionOpen.has(k)) sessionOpen.set(k, q.last);
+          setPriceAliases(lastMids, q.symbol, q.last);
+          if (q.tokenLast != null) setPriceAliases(lastTokens, q.symbol, q.tokenLast);
+          if (lookupPx(sessionOpen, q.symbol) == null) setPriceAliases(sessionOpen, q.symbol, q.last);
         }
         const cache = JSON.stringify({ at: rh.at, quotes: rh.payload });
         await pub.set(QUOTES_CACHE_KEY, cache);
@@ -326,12 +328,27 @@ async function schedule() {
   await queues.catalog.add("boot", {}, { jobId: `catalog-boot-${Date.now()}` });
 }
 
+function listenHealth() {
+  const port = Number(process.env.PORT);
+  if (!Number.isFinite(port) || port <= 0) return;
+  createServer((req, res) => {
+    if (req.url === "/health" || req.url === "/") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, role: "worker" }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  }).listen(port, "0.0.0.0", () => log("worker", "health", { port }));
+}
+
 schedule()
   .then(async () => {
     const extra = await refreshChainlistRpcs().catch(() => []);
     if (extra.length) log("worker", "chainlist rpcs", { n: extra.length });
     await hydratePrevClose().catch((e) => logError("worker", "prevclose", e));
     log("worker", "scheduled", describeLlm());
+    listenHealth();
   })
   .catch((e) => logError("worker", "schedule fail", e));
 

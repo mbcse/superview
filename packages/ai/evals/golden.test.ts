@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { fill, INTERPRETER_PROMPT } from "../src/prompts/index.js";
 import { interpreterSchema } from "../src/prompts/schemas.js";
 import { genObject } from "../src/generate.js";
+import { shouldRefuseView } from "../src/view-guard.js";
 import golden from "./golden-takes.json" with { type: "json" };
 
 function loadRootOpenAiKey() {
@@ -62,6 +63,10 @@ describe("golden interpreter", () => {
     it.skipIf(!process.env.OPENAI_API_KEY)(
       g.id,
       async () => {
+        if (shouldRefuseView(g.sentence)) {
+          expect(g.expectRefuse).toBe(true);
+          return;
+        }
         let out: { refuse: boolean; normalizedView: string; angles: unknown[] };
         try {
           out = await genObject({
@@ -78,8 +83,7 @@ describe("golden interpreter", () => {
           throw err;
         }
         if (g.expectRefuse) {
-          const noWords = !/[A-Za-z]{3,}/.test(g.sentence);
-          expect(out.refuse || noWords).toBe(true);
+          expect(out.refuse || shouldRefuseView(g.sentence)).toBe(true);
         } else {
           expect(out.refuse).toBe(false);
           expect(out.normalizedView.trim().length).toBeGreaterThan(0);

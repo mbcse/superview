@@ -13,6 +13,8 @@
     "db:generate": "pnpm --filter @takeandstake/db generate",
     "db:migrate": "pnpm --filter @takeandstake/db migrate",
     "db:seed": "pnpm --filter @takeandstake/db seed",
+    "start:api": "pnpm --filter @takeandstake/api start",
+    "start:worker": "pnpm --filter @takeandstake/worker start",
     "spike": "pnpm --filter @takeandstake/chain exec tsx ../../scripts/spikes/run.ts"
   },
   "devDependencies": {

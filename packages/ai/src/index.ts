@@ -7,6 +7,7 @@ export { criticModel, fastModel, researchModel, researchResponsesModel, socialMo
 export { ResearchConfigError } from "./errors.js";
 export { isRetryableError, isCreditsError } from "./http-retry.js";
 export { runResearchPipeline, type ResearchEmitter } from "./pipeline.js";
+export { shouldRefuseView } from "./view-guard.js";
 export { enrichToken, enrichStale, fillCompanyAbout } from "./enrichment.js";
 export { runDailyMonitor, replyToComment, writeManusMemo } from "./agent.js";
 export { instructPocket } from "./pocket-instruct.js";

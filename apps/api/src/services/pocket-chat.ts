@@ -16,8 +16,10 @@ export async function handlePocketChat(pocketId: string, userId: string, body: s
   if (!pocket) return { user: userMsg, agent: null };
 
   if (parsed.intent === "add_cash" && parsed.amountUsd) {
-    await depositPaperUsd(pocketId, parsed.amountUsd);
-    if (pocket.mandate?.mode !== "APPROVAL") {
+    const deposited = await depositPaperUsd(pocketId, parsed.amountUsd);
+    if ("error" in deposited) {
+      reply = `Couldn’t add paper cash (${deposited.error}).`;
+    } else if (pocket.mandate?.mode !== "APPROVAL") {
       await runDryRunInvest(pocketId, env);
       reply = parsed.reply || `Added $${Math.round(parsed.amountUsd)} paper and put it into the basket.`;
     } else {

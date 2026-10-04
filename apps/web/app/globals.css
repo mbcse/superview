@@ -297,8 +297,8 @@
   0% { background-color: color-mix(in oklab, var(--color-down) 46%, transparent); }
   100% { background-color: transparent; }
 }
-.tick-up { animation: tick-flash-up 640ms var(--ease-out); }
-.tick-down { animation: tick-flash-down 640ms var(--ease-out); }
+.tick-up { animation: tick-flash-up 420ms var(--ease-out); }
+.tick-down { animation: tick-flash-down 420ms var(--ease-out); }
 @media (prefers-reduced-motion: reduce) {
   .tick-up, .tick-down, .flash-up, .flash-down { animation: none; }
 }

@@ -109,6 +109,7 @@ function PocketCard({
   const legs: Leg[] = p.mark?.legs ?? [];
   const pending = (p.proposals ?? []).filter((x: any) => x.status === "PENDING");
   const approval = p.mandate?.mode !== "AUTO";
+  const [paperAmount, setPaperAmount] = useState("100");
   const cashUsd = Number(p.mark?.cashUsd ?? 0);
   const hasPosition = legs.some((l) => (l.qty ?? 0) > 0);
   const livePositions = legs.reduce((s, l) => {
@@ -200,17 +201,58 @@ function PocketCard({
         </p>
       ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
-        {!hasPosition && p.mode === "DRY_RUN" ? (
-          <Button
-            variant="primary"
-            onClick={async () => {
-              const j = await fetchApi<any>(`/v1/pockets/${p.id}/dry-run-invest`, { method: "POST" });
-              setNotice(`${orderStatusLabel(j.status)} — ${j.fills ?? 0} names filled.`);
-              if (j.orderId) location.href = `/app/order/${j.orderId}`;
-            }}
-          >
-            Put paper into this basket
-          </Button>
+        {p.mode === "DRY_RUN" ? (
+          <>
+            {!hasPosition ? (
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  const j = await fetchApi<any>(`/v1/pockets/${p.id}/dry-run-invest`, { method: "POST" });
+                  setNotice(
+                    j.status === "FAILED"
+                      ? "Order didn’t fill. Paper cash is still in the pocket."
+                      : `${orderStatusLabel(j.status)} — ${j.fills ?? 0} names filled.`
+                  );
+                  if (j.orderId && j.status !== "FAILED") location.href = `/app/order/${j.orderId}`;
+                }}
+              >
+                Put paper into this basket
+              </Button>
+            ) : null}
+            <input
+              aria-label="Paper amount"
+              inputMode="decimal"
+              value={paperAmount}
+              onChange={(e) => setPaperAmount(e.target.value.replace(/[^0-9.]/g, "").slice(0, 9))}
+              className="h-9 w-24 rounded-full border border-teal/15 bg-glass/70 px-3 font-mono text-[13px] text-ink"
+            />
+            <Button
+              variant="ghost"
+              onClick={async () => {
+                const amountUsd = Number(paperAmount);
+                if (!Number.isFinite(amountUsd) || amountUsd <= 0) return;
+                await fetchApi(`/v1/pockets/${p.id}/deposit`, { method: "POST", body: JSON.stringify({ amountUsd }) });
+                setNotice(`Added $${amountUsd.toLocaleString()} paper cash — not real money.`);
+              }}
+            >
+              Deposit paper
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={async () => {
+                const amountUsd = Number(paperAmount);
+                if (!Number.isFinite(amountUsd) || amountUsd <= 0) return;
+                try {
+                  await fetchApi(`/v1/pockets/${p.id}/withdraw`, { method: "POST", body: JSON.stringify({ amountUsd }) });
+                  setNotice(`Withdrew $${amountUsd.toLocaleString()} paper cash.`);
+                } catch {
+                  setNotice("Not enough paper cash to withdraw.");
+                }
+              }}
+            >
+              Withdraw paper
+            </Button>
+          </>
         ) : null}
         <Button
           variant="ghost"

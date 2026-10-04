@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { prisma } from "@takeandstake/db";
-import { applyGuardrails, executePaperRebalance, isInfraCommentBody } from "@takeandstake/core";
+import { applyGuardrails, executePaperRebalance, publicCommentBody } from "@takeandstake/core";
 import { genObject } from "./generate.js";
 import { criticModel, researchModel, socialModel } from "./llm.js";
 import { fill, MANUS_MEMO_PROMPT, MONITOR_PROMPT, THREAD_REPLY_PROMPT } from "./prompts/index.js";
@@ -150,14 +150,15 @@ export async function runDailyMonitor(takeId: string) {
       marketNote: evidence.slice(0, 500)
     }
   });
-  if (!isInfraCommentBody(out.post)) {
+  const brief = publicCommentBody(out.post);
+  if (brief) {
     await prisma.comment.create({
       data: {
         takeId,
         revisionId: take.currentRevisionId,
         authorType: "AGENT",
         kind: "AGENT_BRIEF",
-        body: out.post
+        body: brief
       }
     });
   }
@@ -195,7 +196,8 @@ export async function replyToComment(commentId: string) {
       comment: comment.body
     })
   });
-  if (isInfraCommentBody(out.body)) return null;
+  const reply = publicCommentBody(out.body);
+  if (!reply) return null;
   return prisma.comment.create({
     data: {
       takeId: comment.takeId,
@@ -203,7 +205,7 @@ export async function replyToComment(commentId: string) {
       parentId: comment.id,
       authorType: "AGENT",
       kind: comment.kind === "QUESTION" ? "UPDATE" : "AGENT_BRIEF",
-      body: out.body
+      body: reply
     }
   });
 }
@@ -237,19 +239,19 @@ export async function writeManusMemo(takeId: string) {
         body: JSON.stringify({ prompt })
       });
       const text = await res.text();
-      body = res.ok && !isInfraCommentBody(text) ? text : "";
+      body = res.ok ? publicCommentBody(text) ?? "" : "";
     } catch {
       body = "";
     }
   }
-  if (!body || isInfraCommentBody(body)) {
+  if (!body) {
     const text = await generateText({
       model: criticModel() as never,
       prompt
     });
-    body = text.text;
+    body = publicCommentBody(text.text) ?? "";
   }
-  if (!body.trim() || isInfraCommentBody(body)) return null;
+  if (!body) return null;
   return prisma.comment.create({
     data: {
       takeId,

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
+    "lint": "tsc --noEmit",
     "start": "next start",
     "test": "vitest run"
   },

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { prisma } from "@takeandstake/db";
 import { RESTRICTED_COUNTRIES } from "@takeandstake/shared";
-import { requireAuth, upsertPrivyUser } from "../middleware/auth.js";
+import { requireAuth, upsertPrivyUser, WalletBindError } from "../middleware/auth.js";
 
 export const meRouter = Router();
 
@@ -14,11 +14,16 @@ meRouter.get("/v1/me", requireAuth, async (req, res) => {
 });
 
 meRouter.post("/v1/me/sync", requireAuth, async (req, res) => {
-  const user = await upsertPrivyUser(req.user!.privyId, {
-    displayName: typeof req.body?.displayName === "string" ? req.body.displayName : req.user!.displayName,
-    walletAddress: typeof req.body?.walletAddress === "string" ? req.body.walletAddress : undefined
-  });
-  res.json({ user });
+  try {
+    const user = await upsertPrivyUser(req.user!.privyId, {
+      displayName: typeof req.body?.displayName === "string" ? req.body.displayName : req.user!.displayName,
+      walletAddress: typeof req.body?.walletAddress === "string" ? req.body.walletAddress : undefined
+    });
+    res.json({ user });
+  } catch (err) {
+    if (err instanceof WalletBindError) return res.status(err.status).json({ error: err.code });
+    throw err;
+  }
 });
 
 meRouter.post("/v1/me/attestation", requireAuth, async (req, res) => {

@@ -55,6 +55,21 @@ function formatTick(time: UTCTimestamp, type: TickMarkType) {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
+function asTime(n: number): UTCTimestamp {
+  return n as UTCTimestamp;
+}
+
+function laterTime(time: UTCTimestamp, min: UTCTimestamp): UTCTimestamp {
+  return (time as number) > (min as number) ? time : asTime((min as number) + 1);
+}
+
+function zeroLine(from: UTCTimestamp, to: UTCTimestamp) {
+  return [
+    { time: from, value: 0 },
+    { time: laterTime(to, from), value: 0 }
+  ];
+}
+
 function applyWindow(chart: IChartApi, range: string | undefined, lastIndex: number) {
   const bars = barsForRange(range);
   chart.timeScale().setVisibleLogicalRange({
@@ -118,7 +133,7 @@ export function VsChart({
         rightOffset: 4,
         shiftVisibleRangeOnNewBar: true,
         minBarSpacing: range === "1D" ? 1.5 : 0.05,
-        tickMarkFormatter: (time, type) => formatTick(time as UTCTimestamp, type)
+        tickMarkFormatter: (time: UTCTimestamp, type: TickMarkType) => formatTick(time, type)
       },
       crosshair: { vertLine: { color: "#326D9B" }, horzLine: { color: "#326D9B" } }
     });
@@ -159,10 +174,7 @@ export function VsChart({
     if (!book || !zero || !chart) return;
     if (!hist.length) return;
     book.setData(hist);
-    zero.setData([
-      { time: hist[0]!.time, value: 0 },
-      { time: hist[hist.length - 1]!.time, value: 0 }
-    ]);
+    zero.setData(zeroLine(hist[0]!.time, hist[hist.length - 1]!.time));
     applyWindow(chart, range, hist.length - 1);
   }, [hist, range]);
 
@@ -179,15 +191,12 @@ export function VsChart({
       const time = last && now < last.time ? last.time : now;
       if (!rows.length) {
         book.setData([{ time, value: vs }]);
-        zero?.setData([
-          { time, value: 0 },
-          { time: ((time as number) + 1) as UTCTimestamp, value: 0 }
-        ]);
+        zero?.setData(zeroLine(time, time));
         if (chart) applyWindow(chart, range, 0);
         return;
       }
       book.update({ time, value: vs });
-      zero?.update({ time, value: 0 });
+      zero?.update({ time: laterTime(time, rows[0]!.time), value: 0 });
       chart?.timeScale().scrollToRealTime();
     }
     paint();

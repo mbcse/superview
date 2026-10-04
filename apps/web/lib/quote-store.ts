@@ -15,12 +15,12 @@ export function mergeQuote(prev: LiveQuote | undefined, next: LiveQuote): { quot
     return { quote: prev ?? next, changed: false };
   }
   if (!prev) return { quote: { ...next, dir: null, seq: 1 }, changed: true };
-  const lastChanged = prev.last !== next.last;
+  const lastChanged = Math.abs(prev.last - next.last) > 1e-6;
   const chgChanged = prev.chgPct !== next.chgPct;
   const bookChanged = prev.bid !== next.bid || prev.ask !== next.ask;
   if (!lastChanged && !chgChanged && !bookChanged) return { quote: prev, changed: false };
   const dir = lastChanged ? (next.last > prev.last ? "up" : "down") : (prev.dir ?? null);
-  return { quote: { ...next, dir, seq: (prev.seq ?? 0) + 1 }, changed: true };
+  return { quote: { ...next, dir, seq: lastChanged ? (prev.seq ?? 0) + 1 : (prev.seq ?? 1) }, changed: true };
 }
 
 type Listener = () => void;

@@ -50,6 +50,13 @@ function nestedValue(err: unknown): unknown {
   return undefined;
 }
 
+function holdingWeight(row: unknown): number | undefined {
+  if (!row || typeof row !== "object") return undefined;
+  const raw = (row as { weightPct?: unknown }).weightPct;
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN;
+  return Number.isFinite(n) ? n : undefined;
+}
+
 export function repairLlmValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(repairLlmValue);
   if (value && typeof value === "object") {
@@ -57,6 +64,12 @@ export function repairLlmValue(value: unknown): unknown {
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if ((k === "ring" || k === "role") && (typeof v !== "string" || !RINGS.has(v))) out[k] = "indirect";
       else out[k] = repairLlmValue(v);
+    }
+    if (Array.isArray(out.holdings)) {
+      out.holdings = out.holdings.filter((row) => {
+        const w = holdingWeight(row);
+        return w !== undefined && w >= 1;
+      });
     }
     return out;
   }

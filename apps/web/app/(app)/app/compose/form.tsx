@@ -38,7 +38,7 @@ const STAGES = [
   {
     id: "read",
     icon: MagnifyingGlass,
-    stat: "195 names in focus",
+    stat: "Reading the catalog",
     headline: "Reading the world through your words",
     sentence: "Scanning a universe of tokenized companies for the ones your view actually touches.",
     check: "Understood your view"
@@ -46,7 +46,7 @@ const STAGES = [
   {
     id: "trace",
     icon: ShareNetwork,
-    stat: "4 themes connected",
+    stat: "Tracing the value chain",
     headline: "Tracing who wins if you’re right",
     sentence: "Following the money from direct beneficiaries to the quieter suppliers behind them.",
     check: "Mapped the value chain"
@@ -54,7 +54,7 @@ const STAGES = [
   {
     id: "weigh",
     icon: Scales,
-    stat: "12 candidates weighed",
+    stat: "Weighing the names",
     headline: "Sizing conviction, not hype",
     sentence: "Weighting each company by how closely its fortunes track your thesis.",
     check: "Weighted the basket"
@@ -62,7 +62,7 @@ const STAGES = [
   {
     id: "hedge",
     icon: ShieldCheck,
-    stat: "1 hedge added",
+    stat: "Checking the risk",
     headline: "Planning for being wrong",
     sentence: "Adding a steadier name so one bad quarter doesn’t sink the whole view.",
     check: "Balanced the risk"

@@ -81,11 +81,12 @@ function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: St
 
   useEffect(() => {
     if (!symbol) return;
+    const sym = symbol;
     let stop = false;
     let tries = 0;
     async function load() {
       try {
-        const r = await fetch(`${API_ORIGIN}/v1/tokens/${encodeURIComponent(symbol)}`);
+        const r = await fetch(`${API_ORIGIN}/v1/tokens/${encodeURIComponent(sym)}`);
         const j = (await r.json()) as TokenCard;
         if (stop) return;
         setCard(j);

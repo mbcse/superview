@@ -34,6 +34,7 @@ type TakeRow = {
   dryRun: number;
   live: number;
   backers?: number;
+  seeded?: boolean;
 };
 type Proposal = { id: string; takeId: string; sentence: string | null; trades: unknown };
 
@@ -168,7 +169,7 @@ export default function DashboardClient({ initial }: { initial: TakeRow[] }) {
           <div>
             <p className="text-[13px] text-mint">vs S&P 500</p>
             <h2 className="view mt-2 text-[20px] font-medium leading-snug tracking-[-0.02em] md:text-[24px]">{featured?.sentence}</h2>
-            <p className="mt-2 text-[14px] text-white/70">{agentByTake[featured?.id ?? ""] ?? "Checked today. No change."}</p>
+            <p className="mt-2 text-[14px] text-white/70">{agentByTake[featured?.id ?? ""] ?? (featured?.seeded ? "Seeded view. Chart history is illustrative until live marks fill in." : "Waiting on the first agent review.")}</p>
             <p className="num mt-3 text-[28px] font-semibold text-lime">
               <TickValue value={vs} format={(n) => fmtVsLabel(n, 2)} color="sign" className="text-[28px] font-semibold text-lime" />
             </p>

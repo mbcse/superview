@@ -46,7 +46,8 @@ export function parseDiligenceNotes(text: string, symbols: string[]): Record<str
   for (const line of lines) {
     const heading = line.trim().match(headingRe);
     if (heading) {
-      const tokens = heading[1].match(/[A-Za-z]{1,6}/g) ?? [];
+      const label = heading[1] ?? "";
+      const tokens = label.match(/[A-Za-z]{1,6}/g) ?? [];
       const canon = tokens.map((t) => matchWanted(t)).find(Boolean);
       if (canon) {
         current = canon;
@@ -56,7 +57,7 @@ export function parseDiligenceNotes(text: string, symbols: string[]): Record<str
     }
     const labeled = line.trim().match(/^([A-Za-z]{1,6})\s*[:—-]\s+(.*)$/);
     if (labeled) {
-      const canon = matchWanted(labeled[1]);
+      const canon = matchWanted(labeled[1] ?? "");
       if (canon) {
         current = canon;
         if (!buckets.has(canon)) buckets.set(canon, []);

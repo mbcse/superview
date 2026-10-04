@@ -9,4 +9,6 @@ Liquidity (RH daily volume): {{liquidity}}
 
 Think about: how directly each name expresses the view, overlap between names (avoid owning the same bet twice), balance between conviction and diversification, and what happens to the basket if the main falsifier occurs.
 
+Omit names you do not want. Never emit weightPct 0 — drop the name instead. Each holding must be 1-40.
+
 Return: holdings[{ symbol, weightPct, role, conviction, sizingReason }], cashPct, basketThesis (3 sentences), keyRisks[3], rebalancePolicy (drift threshold and what evidence would change weights), and expectedBehavior (how this basket should behave versus the S&P 500 in plain words).`;

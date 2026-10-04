@@ -3,7 +3,7 @@ import { Queue } from "bullmq";
 import { prisma } from "@takeandstake/db";
 import { takeSentenceSchema, log } from "@takeandstake/shared";
 import { loadEnv } from "@takeandstake/config";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireTakeAuthor } from "../middleware/auth.js";
 import { createRedis, dropRedis, redis } from "../redis.js";
 import { portfolioFromRun, withDraftPayload } from "../services/portfolio-from-run.js";
 
@@ -51,10 +51,10 @@ researchRouter.post("/v1/research", requireAuth, async (req, res) => {
         runId: run.id,
         stage: "draft",
         message: "Reused staged thesis",
-        payload: draft?.payload ?? null
+        ...(draft?.payload != null ? { payload: draft.payload } : {})
       }
     });
-    if (!prior.refuse) {
+    if (prior && !prior.refuse) {
       await prisma.thesisSpec.create({
         data: {
           runId: run.id,
@@ -167,7 +167,9 @@ researchRouter.post("/v1/research/:runId/draft", requireAuth, async (req, res) =
 });
 
 researchRouter.post("/v1/takes/:id/memo", requireAuth, async (req, res) => {
-  await agentQueue.add("memo", { takeId: String(req.params.id) });
+  const owned = await requireTakeAuthor(req.user!.id, String(req.params.id ?? ""));
+  if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
+  await agentQueue.add("memo", { takeId: owned.take.id });
   res.json({ queued: true });
 });
 

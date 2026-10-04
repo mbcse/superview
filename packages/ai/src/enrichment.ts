@@ -45,8 +45,9 @@ export function parseNextEarnings(value: unknown): Date | undefined {
   const direct = new Date(value);
   if (!Number.isNaN(direct.getTime())) return direct;
   const iso = value.match(/(\d{4}-\d{2}-\d{2})/);
-  if (iso) {
-    const d = new Date(iso[1]);
+  const day = iso?.[1];
+  if (day) {
+    const d = new Date(day);
     if (!Number.isNaN(d.getTime())) return d;
   }
   return undefined;

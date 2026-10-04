@@ -31,6 +31,25 @@ describe("optimizer", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("equal-weights a single-sector theme instead of failing min holdings", () => {
+    const result = constructPortfolio(
+      Array.from({ length: 6 }).map((_, i) => ({
+        tokenId: `t${i}`,
+        symbol: `S${i}`,
+        actionId: "direct",
+        sector: "staples",
+        exposure: 0.8,
+        confidence: 0.8,
+        role: "direct" as const
+      }))
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.holdings.length).toBeGreaterThanOrEqual(5);
+    const sum = result.holdings.reduce((s, h) => s + h.weightBps, 0) + result.cashBps;
+    expect(sum).toBe(10_000);
+  });
+
     it("caps a sector at 45%", () => {
       const result = constructPortfolio(
         Array.from({ length: 8 }).map((_, i) => ({

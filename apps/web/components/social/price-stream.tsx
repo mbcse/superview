@@ -69,13 +69,18 @@ function startPriceStream() {
     };
   }
 
+  let wantedPull = 0;
   void pull();
   connect();
   const poll = window.setInterval(() => void pull(), 750);
-  const offWanted = onWanted(() => void pull());
+  const offWanted = onWanted(() => {
+    window.clearTimeout(wantedPull);
+    wantedPull = window.setTimeout(() => void pull(), 80);
+  });
   return () => {
     closed = true;
     window.clearInterval(poll);
+    window.clearTimeout(wantedPull);
     offWanted();
     es?.close();
   };

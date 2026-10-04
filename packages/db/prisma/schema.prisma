@@ -275,6 +275,7 @@ model Wallet {
   createdAt       DateTime         @default(now())
 
   @@unique([address, chainId])
+  @@unique([privyWalletId])
 }
 
 model SanctionsCheck {
@@ -548,6 +549,7 @@ model Take {
   parent            Take?             @relation("TakeTree", fields: [parentTakeId], references: [id])
   children          Take[]            @relation("TakeTree")
   createdAt         DateTime          @default(now())
+  seeded            Boolean           @default(false)
   revisions         TakeRevision[]
   linksFrom         TakeLink[]        @relation("LinkFrom")
   linksTo           TakeLink[]        @relation("LinkTo")

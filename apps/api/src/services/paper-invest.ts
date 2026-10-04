@@ -1,6 +1,7 @@
 import type { Env } from "@takeandstake/config";
 import {
   depositPaperUsd as deposit,
+  withdrawPaperUsd as withdraw,
   executePaperRebalance as execute,
   runDryRunInvest as runInvest,
   weightsFromTrimAdd,
@@ -15,6 +16,10 @@ function paperEnv(env: Env) {
 
 export async function depositPaperUsd(pocketId: string, usd: number) {
   return deposit(pocketId, usd);
+}
+
+export async function withdrawPaperUsd(pocketId: string, usd: number) {
+  return withdraw(pocketId, usd);
 }
 
 export async function runDryRunInvest(pocketId: string, env: Env) {

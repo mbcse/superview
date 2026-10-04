@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { Queue } from "bullmq";
 import { prisma } from "@takeandstake/db";
-import { serializeFeedTake, asNum, backingPrivacy, isInfraCommentBody, visibleComments, windowExcessVsSpy, rangeSince } from "@takeandstake/core";
+import { serializeFeedTake, asNum, backingPrivacy, threadComments, windowExcessVsSpy, rangeSince } from "@takeandstake/core";
 import { commentSchema, stanceSchema } from "@takeandstake/shared";
-import { optionalAuth, requireAuth, requireTakeAuthor } from "../middleware/auth.js";
+import { optionalAuth, requireAuth } from "../middleware/auth.js";
+import { canViewTake, requirePublishedTake } from "../take-access.js";
 import { redis } from "../redis.js";
 
 const socialQueue = new Queue("social", { connection: redis });
@@ -47,7 +48,7 @@ socialRouter.get("/v1/feed", optionalAuth, async (req, res) => {
       }
     : {};
   const takes = await prisma.take.findMany({
-    where: { status: "PUBLISHED", visibility: { in: ["PUBLIC", "UNLISTED"] }, ...authorFilter, ...searchFilter },
+    where: { status: "PUBLISHED", visibility: "PUBLIC", ...authorFilter, ...searchFilter },
     include: {
       author: true,
       revisions: {
@@ -101,7 +102,7 @@ socialRouter.get("/v1/leaderboard", optionalAuth, async (req, res) => {
       }
     : {};
   const takes = await prisma.take.findMany({
-    where: { status: "PUBLISHED", ...searchFilter },
+    where: { status: "PUBLISHED", visibility: { in: ["PUBLIC", "UNLISTED"] }, ...searchFilter },
     include: {
       author: true,
       revisions: { orderBy: { number: "desc" }, take: 1, include: { target: { include: { holdings: { include: { token: true } } } } } },
@@ -159,15 +160,18 @@ socialRouter.get("/v1/takes/:id/thread", optionalAuth, async (req, res) => {
       decisions: { orderBy: { createdAt: "desc" }, take: 20 }
     }
   });
-  if (!take) return res.status(404).json({ error: "not_found" });
+  if (!take || !canViewTake(take, req.user?.id)) return res.status(404).json({ error: "not_found" });
   const privacy = backingPrivacy(take.backings, req.user?.id);
-  res.json({ take: { ...take, comments: visibleComments(take.comments) }, vsSpy: asNum(take.valuations.at(-1)?.indexValue), ...privacy });
+  res.json({ take: { ...take, comments: threadComments(take.comments) }, vsSpy: asNum(take.valuations.at(-1)?.indexValue), ...privacy });
 });
 
 socialRouter.get("/v1/takes/:id/comments", optionalAuth, async (req, res) => {
   const id = pid(req, "id");
-  const take = await prisma.take.findUnique({ where: { id }, select: { id: true, authorId: true } });
-  if (!take) return res.status(404).json({ error: "not_found" });
+  const take = await prisma.take.findUnique({
+    where: { id },
+    select: { id: true, authorId: true, status: true, visibility: true }
+  });
+  if (!take || !canViewTake(take, req.user?.id)) return res.status(404).json({ error: "not_found" });
   const rows = await prisma.comment.findMany({
     where: { takeId: id, status: "VISIBLE" },
     include: {
@@ -176,7 +180,7 @@ socialRouter.get("/v1/takes/:id/comments", optionalAuth, async (req, res) => {
     },
     orderBy: { createdAt: "asc" }
   });
-  const comments = visibleComments(rows)
+  const comments = threadComments(rows)
     .map((c) => ({
       id: c.id,
       body: c.body,
@@ -192,8 +196,10 @@ socialRouter.get("/v1/takes/:id/comments", optionalAuth, async (req, res) => {
 });
 
 socialRouter.post("/v1/takes/:id/fork", requireAuth, async (req, res) => {
+  const access = await requirePublishedTake(pid(req, "id"), req.user!.id);
+  if (!access.ok) return res.status(access.status).json({ error: access.error });
   const original = await prisma.take.findUnique({
-    where: { id: pid(req, "id") },
+    where: { id: access.take.id },
     include: { revisions: { orderBy: { number: "desc" }, take: 1 } }
   });
   if (!original) return res.status(404).json({ error: "not_found" });
@@ -272,13 +278,14 @@ socialRouter.delete("/v1/users/:id/follow", requireAuth, async (req, res) => {
 socialRouter.post("/v1/takes/:id/stance", requireAuth, async (req, res) => {
   const parsed = stanceSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const access = await requirePublishedTake(pid(req, "id"), req.user!.id);
+  if (!access.ok) return res.status(access.status).json({ error: access.error });
   const row = await prisma.takeStance.upsert({
-    where: { takeId_userId: { takeId: pid(req, "id"), userId: req.user!.id } },
+    where: { takeId_userId: { takeId: access.take.id, userId: req.user!.id } },
     update: { stance: parsed.data.stance },
-    create: { takeId: pid(req, "id"), userId: req.user!.id, stance: parsed.data.stance }
+    create: { takeId: access.take.id, userId: req.user!.id, stance: parsed.data.stance }
   });
   res.json({ stance: row });
 });
 
 void commentSchema;
-void requireTakeAuthor;

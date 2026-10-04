@@ -4,16 +4,22 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "@phosphor-icons/react";
 import { signupHref } from "@/lib/auth-paths";
+import { useAuth } from "@/components/auth-provider";
 
 export function LandingComposer() {
   const [value, setValue] = useState("");
   const router = useRouter();
+  const { authenticated } = useAuth();
 
   function submit(e: FormEvent) {
     e.preventDefault();
     const next = value.trim();
-    if (next.length >= 3) sessionStorage.setItem("superview-draft", next);
-    router.push(signupHref("/app/compose"));
+    if (next.length >= 3) {
+      sessionStorage.setItem("superview-draft", next);
+      router.push(authenticated ? "/app/compose" : signupHref("/app/compose"));
+      return;
+    }
+    router.push(authenticated ? "/app" : "/signup");
   }
 
   return (

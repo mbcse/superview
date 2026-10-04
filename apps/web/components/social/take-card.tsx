@@ -39,6 +39,7 @@ export type FeedTake = {
   authorId?: string;
   following?: boolean;
   mine?: boolean;
+  seeded?: boolean;
 };
 
 function initialsOf(name?: string | null) {
@@ -159,7 +160,7 @@ export function TakeCard({
                 <span className="absolute inset-0 animate-ping rounded-full bg-aqua/70" />
                 <span className="relative h-1.5 w-1.5 rounded-full bg-aqua" />
               </span>
-              Live
+              {take.seeded ? "Live quotes · seeded path is illustrative" : "Live"}
             </p>
           </div>
           {take.spark && take.spark.length > 1 ? <Spark values={take.spark} label="vs S&P 500" /> : null}

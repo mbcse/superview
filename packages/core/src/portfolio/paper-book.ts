@@ -1,4 +1,4 @@
-import { prisma } from "@takeandstake/db";
+import { prisma, Prisma } from "@takeandstake/db";
 import { fetchZeroXQuote, quoteUsdPerToken, ROBINHOOD_CHAIN_ID, USDG_MAINNET } from "@takeandstake/chain";
 import { applyFill } from "./ledger.js";
 import { canonicalReceipt } from "../takes/receipt.js";
@@ -36,13 +36,63 @@ type PreparedFill = {
   tokenId: string;
   symbol: string;
   side: "BUY" | "SELL";
-  sellAmount: bigint;
-  buyAmount: string;
+  cashAmount: bigint;
+  tokenAmount: bigint;
   usd: number;
   implied: number;
   quoteJson: object;
   skip?: string;
 };
+
+type Tx = Prisma.TransactionClient;
+
+class PocketLockError extends Error {
+  constructor(readonly code: "not_found" = "not_found") {
+    super(code);
+  }
+}
+
+export async function withPocketLock<T>(pocketId: string, fn: (tx: Tx) => Promise<T>) {
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM "Pocket" WHERE id = ${pocketId} FOR UPDATE
+    `;
+    if (!rows[0]) throw new PocketLockError("not_found");
+    return fn(tx);
+  });
+}
+
+export function prepareSellFill(opts: {
+  requestedUsd: number;
+  haveUsd: number;
+  haveQty: number;
+  implied: number;
+}) {
+  const price = Math.max(opts.implied, 0.01);
+  const usdCap = Math.min(Math.max(0, opts.requestedUsd), Math.max(0, opts.haveUsd));
+  const requestedUnits = paperSellAmount(usdCap, price);
+  const haveUnits = BigInt(Math.floor(Math.max(0, opts.haveQty) * 10 ** TOKEN_DECIMALS));
+  const tokenAmount = requestedUnits > haveUnits ? haveUnits : requestedUnits;
+  const usd = (Number(tokenAmount) / 10 ** TOKEN_DECIMALS) * price;
+  const cashAmount = BigInt(Math.round(usd * 10 ** USDG_DECIMALS));
+  return { tokenAmount, cashAmount, usd };
+}
+
+export function paperFillDeltas(fill: Pick<PreparedFill, "side" | "cashAmount" | "tokenAmount" | "usd">) {
+  const buy = fill.side === "BUY";
+  return {
+    cashDelta: buy ? -fill.cashAmount : fill.cashAmount,
+    tokenDelta: buy ? fill.tokenAmount : -fill.tokenAmount,
+    usd: buy ? fill.usd : -fill.usd
+  };
+}
+
+function orderAmounts(fill: PreparedFill) {
+  if (fill.side === "BUY") {
+    return { sellAmount: fill.cashAmount.toString(), buyAmount: fill.tokenAmount.toString() };
+  }
+  return { sellAmount: fill.tokenAmount.toString(), buyAmount: fill.cashAmount.toString() };
+}
 
 async function priceForToken(tokenId: string, env: PaperEnv, sellMicroUsd: bigint, contractAddress: string) {
   const snap = await latestPrice(tokenId);
@@ -89,189 +139,242 @@ async function writeFills(opts: {
   cashId: string;
   orderId: string;
   fills: PreparedFill[];
+  tx: Tx;
 }) {
-  return prisma.$transaction(async (tx) => {
-    let filled = 0;
-    let skipped = 0;
-    const legsOut: Array<{ symbol: string; status: string; skip?: string }> = [];
-    for (const fill of opts.fills) {
-      if (fill.skip) {
-        skipped += 1;
-        await tx.orderLeg.create({
-          data: {
-            orderId: opts.orderId,
-            side: fill.side,
-            tokenId: fill.tokenId,
-            sellAmount: fill.sellAmount.toString(),
-            status: "SKIPPED",
-            skipReason: fill.skip
-          }
-        });
-        legsOut.push({ symbol: fill.symbol, status: "SKIPPED", skip: fill.skip });
-        continue;
-      }
-      const pos = await tx.ledgerAccount.upsert({
-        where: { pocketId_kind_tokenId: { pocketId: opts.pocketId, kind: "POSITION", tokenId: fill.tokenId } },
-        update: {},
-        create: { pocketId: opts.pocketId, kind: "POSITION", tokenId: fill.tokenId }
-      });
-      const cashDelta = fill.side === "BUY" ? -fill.sellAmount : fill.sellAmount;
-      const tokenDelta =
-        fill.side === "BUY" ? BigInt(fill.buyAmount) : -BigInt(fill.buyAmount || fill.sellAmount);
-      const usd = fill.side === "BUY" ? fill.usd : -fill.usd;
-      const lines = applyFill({
-        cashAccountId: opts.cashId,
-        positionAccountId: pos.id,
-        cashDelta,
-        tokenDelta,
-        usd
-      });
-      const ledgerTx = await tx.ledgerTransaction.create({
-        data: { pocketId: opts.pocketId, type: "FILL", orderLegId: undefined }
-      });
-      await tx.ledgerEntry.createMany({
-        data: lines.map((l) => ({
-          transactionId: ledgerTx.id,
-          accountId: l.accountId,
-          amount: l.amount.toString(),
-          usdValue: l.usdValue
-        }))
-      });
+  const tx = opts.tx;
+  let filled = 0;
+  let skipped = 0;
+  const legsOut: Array<{ symbol: string; status: string; skip?: string }> = [];
+  for (const fill of opts.fills) {
+    const amounts = orderAmounts(fill);
+    if (fill.skip) {
+      skipped += 1;
       await tx.orderLeg.create({
         data: {
           orderId: opts.orderId,
           side: fill.side,
           tokenId: fill.tokenId,
-          sellAmount: fill.sellAmount.toString(),
-          status: "FILLED",
-          quotes: {
-            create: {
-              quoteJson: fill.quoteJson,
-              buyAmount: fill.buyAmount,
-              price: fill.implied,
-              expiresAt: new Date(Date.now() + 30_000)
+          sellAmount: amounts.sellAmount,
+          status: "SKIPPED",
+          skipReason: fill.skip
+        }
+      });
+      legsOut.push({ symbol: fill.symbol, status: "SKIPPED", skip: fill.skip });
+      continue;
+    }
+    const pos = await tx.ledgerAccount.upsert({
+      where: { pocketId_kind_tokenId: { pocketId: opts.pocketId, kind: "POSITION", tokenId: fill.tokenId } },
+      update: {},
+      create: { pocketId: opts.pocketId, kind: "POSITION", tokenId: fill.tokenId }
+    });
+    const deltas = paperFillDeltas(fill);
+    const lines = applyFill({
+      cashAccountId: opts.cashId,
+      positionAccountId: pos.id,
+      cashDelta: deltas.cashDelta,
+      tokenDelta: deltas.tokenDelta,
+      usd: deltas.usd
+    });
+    const ledgerTx = await tx.ledgerTransaction.create({
+      data: { pocketId: opts.pocketId, type: "FILL", orderLegId: undefined }
+    });
+    await tx.ledgerEntry.createMany({
+      data: lines.map((l) => ({
+        transactionId: ledgerTx.id,
+        accountId: l.accountId,
+        amount: l.amount.toString(),
+        usdValue: l.usdValue
+      }))
+    });
+    await tx.orderLeg.create({
+      data: {
+        orderId: opts.orderId,
+        side: fill.side,
+        tokenId: fill.tokenId,
+        sellAmount: amounts.sellAmount,
+        status: "FILLED",
+        quotes: {
+          create: {
+            quoteJson: fill.quoteJson,
+            buyAmount: amounts.buyAmount,
+            price: fill.implied,
+            expiresAt: new Date(Date.now() + 30_000)
+          }
+        }
+      }
+    });
+    filled += 1;
+    legsOut.push({ symbol: fill.symbol, status: "FILLED" });
+  }
+  const status = filled === 0 ? "FAILED" : skipped > 0 ? "PARTIAL" : "FILLED";
+  await tx.order.update({ where: { id: opts.orderId }, data: { status } });
+  return { filled, fills: filled, skipped, status, legs: legsOut };
+}
+
+export function parsePaperUsd(usd: number) {
+  if (!Number.isFinite(usd) || usd <= 0 || usd > 1_000_000) return null;
+  return Math.round(usd * 100) / 100;
+}
+
+function cashUnitsFromEntries(entries: { amount: { toFixed(n: number): string } }[]) {
+  return entries.reduce((s, e) => s + BigInt(e.amount.toFixed(0)), 0n);
+}
+
+export async function depositPaperUsd(pocketId: string, usd: number) {
+  const amountUsd = parsePaperUsd(usd);
+  if (amountUsd == null) return { error: "bad_amount" as const };
+  try {
+    return await withPocketLock(pocketId, async (tx) => {
+      const cash = await tx.ledgerAccount.upsert({
+        where: { pocketId_kind_tokenId: { pocketId, kind: "CASH", tokenId: "USDG" } },
+        update: {},
+        create: { pocketId, kind: "CASH", tokenId: "USDG" }
+      });
+      const amount = String(Math.round(amountUsd * 1_000_000));
+      const ledgerTx = await tx.ledgerTransaction.create({
+        data: { pocketId, type: "DEPOSIT" }
+      });
+      await tx.ledgerEntry.create({
+        data: { transactionId: ledgerTx.id, accountId: cash.id, amount, usdValue: amountUsd }
+      });
+      await tx.backing.updateMany({
+        where: { pocketId },
+        data: { amountUsd: { increment: amountUsd } }
+      });
+      return { cashId: cash.id, usd: amountUsd };
+    });
+  } catch (err) {
+    if (err instanceof PocketLockError) return { error: "not_found" as const };
+    throw err;
+  }
+}
+
+export async function withdrawPaperUsd(pocketId: string, usd: number) {
+  const amountUsd = parsePaperUsd(usd);
+  if (amountUsd == null) return { error: "bad_amount" as const };
+  try {
+    return await withPocketLock(pocketId, async (tx) => {
+      const cash = await tx.ledgerAccount.findFirst({ where: { pocketId, kind: "CASH", tokenId: "USDG" } });
+      if (!cash) return { error: "no_paper_usdg" as const };
+      const entries = await tx.ledgerEntry.findMany({ where: { accountId: cash.id } });
+      const cashUnits = cashUnitsFromEntries(entries);
+      const need = BigInt(Math.round(amountUsd * 1_000_000));
+      if (cashUnits < need) return { error: "insufficient_cash" as const };
+      const ledgerTx = await tx.ledgerTransaction.create({
+        data: { pocketId, type: "WITHDRAW" }
+      });
+      await tx.ledgerEntry.create({
+        data: { transactionId: ledgerTx.id, accountId: cash.id, amount: (-need).toString(), usdValue: -amountUsd }
+      });
+      await tx.backing.updateMany({
+        where: { pocketId },
+        data: { amountUsd: { decrement: amountUsd } }
+      });
+      return { usd: amountUsd, remainingUsd: Number(cashUnits - need) / 1e6 };
+    });
+  } catch (err) {
+    if (err instanceof PocketLockError) return { error: "not_found" as const };
+    throw err;
+  }
+}
+
+export async function runDryRunInvest(pocketId: string, env: PaperEnv) {
+  try {
+    return await withPocketLock(pocketId, async (tx) => {
+      const pocket = await tx.pocket.findUnique({
+        where: { id: pocketId },
+        include: {
+          take: {
+            include: {
+              revisions: {
+                orderBy: { number: "desc" },
+                take: 1,
+                include: { target: { include: { holdings: { include: { token: true } } } } }
+              }
             }
           }
         }
       });
-      filled += 1;
-      legsOut.push({ symbol: fill.symbol, status: "FILLED" });
-    }
-    const status = filled === 0 ? "FAILED" : skipped > 0 ? "PARTIAL" : "FILLED";
-    await tx.order.update({ where: { id: opts.orderId }, data: { status } });
-    return { filled, fills: filled, skipped, status, legs: legsOut };
-  });
-}
-
-export async function depositPaperUsd(pocketId: string, usd: number) {
-  const cash = await prisma.ledgerAccount.upsert({
-    where: { pocketId_kind_tokenId: { pocketId, kind: "CASH", tokenId: "USDG" } },
-    update: {},
-    create: { pocketId, kind: "CASH", tokenId: "USDG" }
-  });
-  const amount = String(Math.round(usd * 1_000_000));
-  await prisma.$transaction(async (tx) => {
-    const ledgerTx = await tx.ledgerTransaction.create({
-      data: { pocketId, type: "DEPOSIT" }
-    });
-    await tx.ledgerEntry.create({
-      data: { transactionId: ledgerTx.id, accountId: cash.id, amount, usdValue: usd }
-    });
-    const backing = await tx.backing.findFirst({ where: { pocketId } });
-    if (backing) {
-      await tx.backing.update({
-        where: { id: backing.id },
-        data: { amountUsd: Number(backing.amountUsd ?? 0) + usd }
+      if (!pocket || pocket.mode !== "DRY_RUN") return { error: "not_found" as const };
+      const target = pocket.take.revisions[0]?.target;
+      if (!target) return { error: "no_target" as const };
+      const cash = await tx.ledgerAccount.findFirst({ where: { pocketId: pocket.id, kind: "CASH" } });
+      if (!cash) return { error: "no_paper_usdg" as const };
+      const entries = await tx.ledgerEntry.findMany({ where: { accountId: cash.id } });
+      const cashUnits = cashUnitsFromEntries(entries);
+      const order = await tx.order.create({
+        data: { pocketId: pocket.id, mode: "DRY_RUN", kind: "INVEST", status: "SUBMITTING" }
       });
-    }
-  });
-  return { cashId: cash.id, usd };
-}
-
-export async function runDryRunInvest(pocketId: string, env: PaperEnv) {
-  const pocket = await prisma.pocket.findUnique({
-    where: { id: pocketId },
-    include: {
-      take: {
-        include: {
-          revisions: {
-            orderBy: { number: "desc" },
-            take: 1,
-            include: { target: { include: { holdings: { include: { token: true } } } } }
-          }
+      const prepared: PreparedFill[] = [];
+      for (const h of target.holdings) {
+        const cashAmount = (cashUnits * BigInt(h.weightBps)) / 10_000n;
+        if (cashAmount < 5_000_000n) {
+          prepared.push({
+            tokenId: h.tokenId,
+            symbol: h.token.symbol,
+            side: "BUY",
+            cashAmount,
+            tokenAmount: 0n,
+            usd: Number(cashAmount) / 1e6,
+            implied: 0,
+            quoteJson: {},
+            skip: "dust"
+          });
+          continue;
         }
+        if (h.token.isTradingHalt) {
+          prepared.push({
+            tokenId: h.tokenId,
+            symbol: h.token.symbol,
+            side: "BUY",
+            cashAmount,
+            tokenAmount: 0n,
+            usd: Number(cashAmount) / 1e6,
+            implied: 0,
+            quoteJson: {},
+            skip: "halt"
+          });
+          continue;
+        }
+        const priced = await priceForToken(h.tokenId, env, cashAmount, h.token.contractAddress);
+        if ("skip" in priced && priced.skip) {
+          prepared.push({
+            tokenId: h.tokenId,
+            symbol: h.token.symbol,
+            side: "BUY",
+            cashAmount,
+            tokenAmount: 0n,
+            usd: Number(cashAmount) / 1e6,
+            implied: 0,
+            quoteJson: {},
+            skip: priced.skip
+          });
+          continue;
+        }
+        prepared.push({
+          tokenId: h.tokenId,
+          symbol: h.token.symbol,
+          side: "BUY",
+          cashAmount,
+          tokenAmount: BigInt(priced.buyAmount ?? "0"),
+          usd: Number(cashAmount) / 1e6,
+          implied: priced.implied!,
+          quoteJson: priced.quoteJson!
+        });
       }
-    }
-  });
-  if (!pocket || pocket.mode !== "DRY_RUN") return { error: "not_found" as const };
-  const target = pocket.take.revisions[0]?.target;
-  if (!target) return { error: "no_target" as const };
-  const cash = await prisma.ledgerAccount.findFirst({ where: { pocketId: pocket.id, kind: "CASH" } });
-  if (!cash) return { error: "no_paper_usdg" as const };
-  const entries = await prisma.ledgerEntry.findMany({ where: { accountId: cash.id } });
-  const cashUnits = entries.reduce((s, e) => s + BigInt(e.amount.toFixed(0)), 0n);
-  const order = await prisma.order.create({
-    data: { pocketId: pocket.id, mode: "DRY_RUN", kind: "INVEST", status: "SUBMITTING" }
-  });
-  const prepared: PreparedFill[] = [];
-  for (const h of target.holdings) {
-    const sell = (cashUnits * BigInt(h.weightBps)) / 10_000n;
-    if (sell < 5_000_000n) {
-      prepared.push({
-        tokenId: h.tokenId,
-        symbol: h.token.symbol,
-        side: "BUY",
-        sellAmount: sell,
-        buyAmount: "0",
-        usd: Number(sell) / 1e6,
-        implied: 0,
-        quoteJson: {},
-        skip: "dust"
+      const result = await writeFills({
+        pocketId: pocket.id,
+        cashId: cash.id,
+        orderId: order.id,
+        fills: prepared,
+        tx
       });
-      continue;
-    }
-    if (h.token.isTradingHalt) {
-      prepared.push({
-        tokenId: h.tokenId,
-        symbol: h.token.symbol,
-        side: "BUY",
-        sellAmount: sell,
-        buyAmount: "0",
-        usd: Number(sell) / 1e6,
-        implied: 0,
-        quoteJson: {},
-        skip: "halt"
-      });
-      continue;
-    }
-    const priced = await priceForToken(h.tokenId, env, sell, h.token.contractAddress);
-    if ("skip" in priced && priced.skip) {
-      prepared.push({
-        tokenId: h.tokenId,
-        symbol: h.token.symbol,
-        side: "BUY",
-        sellAmount: sell,
-        buyAmount: "0",
-        usd: Number(sell) / 1e6,
-        implied: 0,
-        quoteJson: {},
-        skip: priced.skip
-      });
-      continue;
-    }
-    prepared.push({
-      tokenId: h.tokenId,
-      symbol: h.token.symbol,
-      side: "BUY",
-      sellAmount: sell,
-      buyAmount: priced.buyAmount!,
-      usd: Number(sell) / 1e6,
-      implied: priced.implied!,
-      quoteJson: priced.quoteJson!
+      return { orderId: order.id, ...result, currency: "Paper USDG" };
     });
+  } catch (err) {
+    if (err instanceof PocketLockError) return { error: "not_found" as const };
+    throw err;
   }
-  const result = await writeFills({ pocketId: pocket.id, cashId: cash.id, orderId: order.id, fills: prepared });
-  return { orderId: order.id, ...result, currency: "Paper USDG" };
 }
 
 export async function materializeTarget(opts: {
@@ -357,6 +460,8 @@ export async function executePaperRebalance(
     changeSummary: opts?.changeSummary ?? "Agent rebalance"
   });
 
+  try {
+    return await withPocketLock(pocketId, async (tx) => {
   const mark = await computePocketMark(pocket.id);
   const navUsd = mark?.navUsd ?? 0;
   const trades = planRebalanceTrades(
@@ -365,15 +470,15 @@ export async function executePaperRebalance(
     weights,
     opts?.skipUsd ?? 5
   );
-  const cash = await prisma.ledgerAccount.upsert({
+  const cash = await tx.ledgerAccount.upsert({
     where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "CASH", tokenId: "USDG" } },
     update: {},
     create: { pocketId: pocket.id, kind: "CASH", tokenId: "USDG" }
   });
-  const order = await prisma.order.create({
+  const order = await tx.order.create({
     data: { pocketId: pocket.id, mode: "DRY_RUN", kind: "REBALANCE", status: "SUBMITTING" }
   });
-  const tokenRows = await prisma.stockToken.findMany({
+  const tokenRows = await tx.stockToken.findMany({
     where: { id: { in: [...new Set(trades.map((t) => t.tokenId))] } }
   });
   const tokenById = new Map(tokenRows.map((t) => [t.id, t]));
@@ -386,8 +491,8 @@ export async function executePaperRebalance(
         tokenId: token.id,
         symbol: token.symbol,
         side: trade.side,
-        sellAmount: 0n,
-        buyAmount: "0",
+        cashAmount: 0n,
+        tokenAmount: 0n,
         usd: trade.usd,
         implied: 0,
         quoteJson: {},
@@ -402,8 +507,8 @@ export async function executePaperRebalance(
         tokenId: token.id,
         symbol: token.symbol,
         side: trade.side,
-        sellAmount: sellMicro,
-        buyAmount: "0",
+        cashAmount: sellMicro,
+        tokenAmount: 0n,
         usd: trade.usd,
         implied: 0,
         quoteJson: {},
@@ -414,18 +519,19 @@ export async function executePaperRebalance(
     const implied = priced.implied ?? 0;
     if (trade.side === "SELL") {
       const have = mark?.legs.find((l) => l.tokenId === token.id);
-      const haveUsd = have?.mtm ?? 0;
-      const usd = Math.min(trade.usd, haveUsd);
-      const units = paperSellAmount(usd, implied);
-      const haveUnits = BigInt(Math.floor((have?.qty ?? 0) * 10 ** TOKEN_DECIMALS));
-      const sellUnits = units > haveUnits && haveUnits > 0n ? haveUnits : units;
+      const sold = prepareSellFill({
+        requestedUsd: trade.usd,
+        haveUsd: have?.mtm ?? 0,
+        haveQty: have?.qty ?? 0,
+        implied
+      });
       prepared.push({
         tokenId: token.id,
         symbol: token.symbol,
         side: "SELL",
-        sellAmount: sellMicro,
-        buyAmount: sellUnits.toString(),
-        usd,
+        cashAmount: sold.cashAmount,
+        tokenAmount: sold.tokenAmount,
+        usd: sold.usd,
         implied,
         quoteJson: priced.quoteJson ?? { mode: "paper_rh_ask", priceUsd: implied }
       });
@@ -434,17 +540,17 @@ export async function executePaperRebalance(
         tokenId: token.id,
         symbol: token.symbol,
         side: "BUY",
-        sellAmount: sellMicro,
-        buyAmount: priced.buyAmount ?? paperBuyAmount(sellMicro, implied),
+        cashAmount: sellMicro,
+        tokenAmount: BigInt(priced.buyAmount ?? paperBuyAmount(sellMicro, implied)),
         usd: trade.usd,
         implied,
         quoteJson: priced.quoteJson ?? { mode: "paper_rh_ask", priceUsd: implied }
       });
     }
   }
-  const result = await writeFills({ pocketId: pocket.id, cashId: cash.id, orderId: order.id, fills: prepared });
+  const result = await writeFills({ pocketId: pocket.id, cashId: cash.id, orderId: order.id, fills: prepared, tx });
   if (opts?.proposalId) {
-    await prisma.rebalanceProposal.update({
+    await tx.rebalanceProposal.update({
       where: { id: opts.proposalId },
       data: {
         status: result.status === "FAILED" ? "BLOCKED" : "AUTO_EXECUTED",
@@ -461,6 +567,11 @@ export async function executePaperRebalance(
     ...result,
     currency: "Paper USDG"
   };
+    });
+  } catch (err) {
+    if (err instanceof PocketLockError) return { error: "not_found" as const };
+    throw err;
+  }
 }
 
 export function weightsFromTrimAdd(

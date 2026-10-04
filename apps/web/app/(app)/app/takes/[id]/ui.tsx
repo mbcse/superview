@@ -139,7 +139,6 @@ export default function TakeClient({ data }: { data: any }) {
   });
   const summary = vs == null ? "No mark vs S&P 500 yet." : `${fmtVs(vs)} vs S&P 500.`;
   const research = rev?.researchRun;
-  const models = (research?.modelVersions ?? {}) as { critic?: { issues?: unknown }; pm?: { basketThesis?: string }; notes?: string[] };
   const authorName = take.author?.displayName ?? take.author?.handle ?? "Member";
   const candidates = research?.candidates ?? [];
   const scoreBySymbol = new Map(
@@ -221,7 +220,10 @@ export default function TakeClient({ data }: { data: any }) {
   }
 
   const memo = (take.comments ?? []).find(
-    (c: any) => c.isPinned && c.authorType === "AGENT" && !/invalid token|"code"\s*:\s*16/i.test(String(c.body ?? ""))
+    (c: any) =>
+      c.isPinned &&
+      c.authorType === "AGENT" &&
+      !/invalid token|"code"\s*:\s*16|Write an investment memo|You are the agent that runs this view|\{\{view\}\}/i.test(String(c.body ?? ""))
   );
   const backers = data.backers ?? take.backings?.filter((b: any) => b.level === "DRY_RUN" || b.level === "LIVE").length ?? 0;
 
@@ -257,7 +259,7 @@ export default function TakeClient({ data }: { data: any }) {
                 <span className="absolute inset-0 animate-ping rounded-full bg-aqua/70" />
                 <span className="relative h-1.5 w-1.5 rounded-full bg-aqua" />
               </span>
-              vs S&P 500 · live
+              {take.seeded ? "vs S&P 500 · live quotes, seeded history is illustrative" : "vs S&P 500 · live"}
             </p>
           </div>
           <div className="text-right">
@@ -323,7 +325,6 @@ export default function TakeClient({ data }: { data: any }) {
             {Array.isArray(research.actions) ? (
               <p className="text-muted">Angles: {research.actions.map((a: any) => a.name).join(" · ")}</p>
             ) : null}
-            {models.critic ? <p className="text-muted">Critic: {JSON.stringify(models.critic).slice(0, 240)}</p> : null}
           </div>
         ) : null}
         <ul className="mt-4 space-y-2 text-[14px] text-muted">

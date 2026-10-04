@@ -35,6 +35,7 @@ export function InvestDialog({
   const [liveOk, setLiveOk] = useState(false);
   const [mode, setMode] = useState<"DRY_RUN" | "LIVE">("DRY_RUN");
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [fill, setFill] = useState<{ status?: string; fills?: number; skipped?: number } | null>(null);
   const usd = Number(amount);
   const valid = Number.isFinite(usd) && usd >= 1;
   const live = mode === "LIVE";
@@ -47,6 +48,7 @@ export function InvestDialog({
     setReveal(false);
     setMode("DRY_RUN");
     setOrderId(null);
+    setFill(null);
   }, [takeId]);
 
   useEffect(() => {
@@ -70,21 +72,22 @@ export function InvestDialog({
     setBusy(true);
     setError("");
     try {
-      const r = await fetchApi<{ pocket?: { id: string }; invest?: { fills?: number; orderId?: string } }>(
-        `/v1/takes/${takeId}/back`,
-        {
-          method: "POST",
-          body: JSON.stringify({ level: mode, mandateMode: "AUTO", amountUsd: usd, revealAmount: reveal })
-        }
-      );
+      const r = await fetchApi<{
+        pocket?: { id: string };
+        invest?: { fills?: number; skipped?: number; status?: string; orderId?: string };
+      }>(`/v1/takes/${takeId}/back`, {
+        method: "POST",
+        body: JSON.stringify({ level: mode, mandateMode: "AUTO", amountUsd: usd, revealAmount: reveal })
+      });
       let filled = r.invest;
-      if (r.pocket?.id && !filled?.fills) {
-        filled = await fetchApi<{ fills?: number; orderId?: string }>(
+      if (r.pocket?.id && !filled?.status && !filled?.fills) {
+        filled = await fetchApi<{ fills?: number; skipped?: number; status?: string; orderId?: string }>(
           live ? `/v1/pockets/${r.pocket.id}/live-invest` : `/v1/pockets/${r.pocket.id}/dry-run-invest`,
           { method: "POST", body: JSON.stringify({ amountUsd: usd }) }
         );
       }
       setOrderId(filled?.orderId ?? null);
+      setFill({ status: filled?.status, fills: filled?.fills, skipped: filled?.skipped });
       setDone(true);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setError("Sign in to invest.");
@@ -140,11 +143,28 @@ export function InvestDialog({
                   />
                 </svg>
                 <h2 id="invest-title" className="display mt-5 text-[28px] text-ink">
-                  You’re invested
+                  {fill?.status === "PARTIAL"
+                    ? "Partial fill"
+                    : fill?.status === "FAILED"
+                      ? "Order didn’t fill"
+                      : fill?.status === "FILLED"
+                        ? "You’re invested"
+                        : "Pocket created"}
                 </h2>
                 <p className="mt-2 text-[15px] text-muted">
-                  <span className="font-mono text-ink">{formatMoney(usd)}</span>{" "}
-                  {live ? "of USDG is now tracking" : "of paper money is now tracking"}
+                  {fill?.status === "FAILED" ? (
+                    "No legs filled. Paper cash is still in the pocket."
+                  ) : fill?.status === "PARTIAL" ? (
+                    <>
+                      <span className="font-mono text-ink">{fill.fills ?? 0}</span> names filled
+                      {fill.skipped ? `, ${fill.skipped} skipped` : ""}.
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-mono text-ink">{formatMoney(usd)}</span>{" "}
+                      {live ? "of USDG is now tracking" : "of paper money is now tracking"}
+                    </>
+                  )}
                 </p>
                 <p className="mt-4 text-[16px] font-medium leading-snug text-ink">“{sentence ?? "View"}”</p>
                 <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[12px] font-medium text-ink">

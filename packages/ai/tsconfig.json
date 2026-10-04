@@ -8,5 +8,6 @@
     "rootDir": ".",
     "resolveJsonModule": true
   },
-  "include": ["src", "evals"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "evals"]
 }

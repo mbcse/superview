@@ -211,6 +211,7 @@ async function seedView(
       authorId,
       status: "PUBLISHED",
       visibility: "PUBLIC",
+      seeded: true,
       createdAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
     }
   });
@@ -339,7 +340,12 @@ async function main() {
     if (take) published += 1;
   }
 
-  console.log(`Seeded flags, ${users.size} users, ${published} published views. live_trading stays off.`);
+  await prisma.take.updateMany({
+    where: { revisions: { some: { sentence: { in: VIEWS.map((v) => v.sentence) } } } },
+    data: { seeded: true }
+  });
+
+  console.log(`Seeded flags, ${users.size} users, ${published} published views. Seeded charts are illustrative. live_trading stays off.`);
 }
 
 main()

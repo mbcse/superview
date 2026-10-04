@@ -8,7 +8,7 @@ export type VsHolding = {
   publish?: number | null;
 };
 
-type Quote = { last?: number | null; tokenLast?: number | null };
+type Quote = { last?: number | null; tokenLast?: number | null; chgPct?: number | null };
 
 function quoteOf(quotes: Record<string, Quote>, symbol: string) {
   const u = symbol.toUpperCase();
@@ -51,14 +51,33 @@ export function liveVsSpy(
     acc += (h.weightBps / 10_000) * (last / publish);
     w += h.weightBps / 10_000;
   }
-  if (w <= 0) return fallback ?? null;
+  if (w <= 0) return dayVsSpy(holdings, quotes) ?? fallback ?? null;
   const index = 100 * (acc / w);
   const spyQ = quoteOf(quotes, "SPY") ?? quoteOf(quotes, "RHSPY");
   const spyLast = spyQ?.last ?? null;
   const spyPub = asSharePrice(spyPublish, spyLast, spyQ?.tokenLast);
-  if (spyLast != null && spyPub != null && spyPub > 0) return index - 100 * (spyLast / spyPub);
-  if (storedBenchmark != null) return index - storedBenchmark;
-  return fallback ?? null;
+  const since =
+    spyLast != null && spyPub != null && spyPub > 0
+      ? index - 100 * (spyLast / spyPub)
+      : storedBenchmark != null
+        ? index - storedBenchmark
+        : fallback ?? null;
+  if (since != null && Math.abs(since) >= 0.005) return since;
+  return dayVsSpy(holdings, quotes) ?? since ?? fallback ?? null;
+}
+
+function dayVsSpy(holdings: VsHolding[], quotes: Record<string, Quote>) {
+  let acc = 0;
+  let w = 0;
+  for (const h of holdings) {
+    const pct = finite(quoteOf(quotes, h.symbol)?.chgPct);
+    if (pct == null) continue;
+    acc += (h.weightBps / 10_000) * pct;
+    w += h.weightBps / 10_000;
+  }
+  const spy = finite(quoteOf(quotes, "SPY")?.chgPct) ?? finite(quoteOf(quotes, "RHSPY")?.chgPct);
+  if (w <= 0 || spy == null) return null;
+  return 100 * (acc / w - spy);
 }
 
 export function useLiveVsSpy(

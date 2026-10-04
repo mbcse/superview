@@ -24,4 +24,12 @@ describe("mergeQuote", () => {
     expect(r.changed).toBe(false);
     expect(r.quote).toBe(first);
   });
+
+  it("does not flash when only the book ticks", () => {
+    const first = mergeQuote(undefined, base).quote;
+    const r = mergeQuote(first, { ...base, bid: 82.11, ask: 82.29 });
+    expect(r.changed).toBe(true);
+    expect(r.quote.seq).toBe(first.seq);
+    expect(r.quote.dir).toBeNull();
+  });
 });

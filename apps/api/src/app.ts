@@ -3,7 +3,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import helmet from "helmet";
 import { loadEnv } from "@takeandstake/config";
 import { prisma } from "@takeandstake/db";
-import { executePaperRebalance, runDryRunInvest } from "./services/paper-invest.js";
+import { depositPaperUsd, executePaperRebalance, runDryRunInvest, withdrawPaperUsd } from "./services/paper-invest.js";
 import { runLiveInvest } from "./services/live-invest.js";
 import { handlePocketChat } from "./services/pocket-chat.js";
 import { portfolioFromRun, withDraftPayload } from "./services/portfolio-from-run.js";
@@ -19,6 +19,9 @@ import {
   syncRobinhoodCatalog,
   syncCorporateActions,
   filterQuotes,
+  quoteHasSymbol,
+  inheritAliasChg,
+  attachDayChange,
   QUOTES_CACHE_KEY,
   backingPrivacy,
   sanitizeBacking,
@@ -26,8 +29,11 @@ import {
   loadTokenCard
 } from "@takeandstake/core";
 import { refreshChainlistRpcs } from "@takeandstake/chain";
-import { STOCK_TOKEN_COPY, backRequestSchema, backingPrivacySchema, commentSchema, pocketChatSchema, stanceSchema, log, logError } from "@takeandstake/shared";
-import { optionalAuth, requireAdmin, requireAuth, requirePocketOwner, requireTakeAuthor, verifyPrivyWebhook } from "./middleware/auth.js";
+import { STOCK_TOKEN_COPY, backRequestSchema, backingPrivacySchema, commentSchema, pocketChatSchema, log, logError } from "@takeandstake/shared";
+import { optionalAuth, requireAdmin, requireAuth, requirePocketOwner, requireTakeAuthor, verifyAlchemyWebhook, verifyPrivyWebhook } from "./middleware/auth.js";
+import { canViewTake, loadViewableTake, requirePublishedTake } from "./take-access.js";
+import { liveGrantContracts } from "./wallet-bind.js";
+import { USDG_MAINNET } from "@takeandstake/chain";
 import { meRouter } from "./routes/me.js";
 import { researchRouter } from "./routes/research.js";
 import { socialRouter } from "./routes/social.js";
@@ -120,25 +126,36 @@ app.get("/v1/quotes", async (req, res) => {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+  let quotes: Array<{ symbol: string; last?: number | null; chgPct?: number | null }> = [];
+  let at = new Date().toISOString();
   try {
     const cached = await redis.get(QUOTES_CACHE_KEY);
     if (cached) {
-      const parsed = JSON.parse(cached) as { quotes?: Array<{ symbol: string }>; at?: string };
-      const quotes = filterQuotes(parsed.quotes ?? [], symbols.length ? symbols : undefined);
-      return res.json({ quotes, at: parsed.at ?? new Date().toISOString() });
+      const parsed = JSON.parse(cached) as { quotes?: Array<{ symbol: string; last?: number | null; chgPct?: number | null }>; at?: string };
+      quotes = filterQuotes(parsed.quotes ?? [], symbols.length ? symbols : undefined);
+      at = parsed.at ?? at;
     }
   } catch {
     /* fall through */
   }
-  const quotes = await listQuotes(symbols.length ? symbols : undefined);
-  res.json({ quotes, at: new Date().toISOString() });
+  const missing = symbols.filter((s) => !quoteHasSymbol(quotes, s));
+  if (!quotes.length || missing.length) {
+    const extra = await listQuotes(missing.length ? missing : symbols.length ? symbols : undefined);
+    const seen = new Set(quotes.map((q) => q.symbol.toUpperCase()));
+    for (const q of extra) {
+      if (!seen.has(q.symbol.toUpperCase())) quotes.push(q);
+    }
+  }
+  res.json({ quotes: await attachDayChange(inheritAliasChg(quotes)), at });
 });
 
-app.get("/v1/takes/:id/series", async (req, res) => {
+app.get("/v1/takes/:id/series", optionalAuth, async (req, res) => {
+  const access = await loadViewableTake(pid(req, "id"), req.user?.id);
+  if (!access.ok) return res.status(access.status).json({ error: access.error });
   const range = String(req.query.range ?? "1D");
-  const points = await takeSeries(pid(req, "id"), range);
+  const points = await takeSeries(access.take.id, range);
   res.json({
-    takeId: pid(req, "id"),
+    takeId: access.take.id,
     range,
     points: points.map((p) => ({
       asOf: p.asOf instanceof Date ? p.asOf.toISOString() : p.asOf,
@@ -175,7 +192,7 @@ app.get("/v1/takes/:id", optionalAuth, async (req, res) => {
       decisions: { orderBy: { createdAt: "desc" }, take: 8 }
     }
   });
-  if (!take) return res.status(404).json({ error: "not_found" });
+  if (!take || !canViewTake(take, req.user?.id)) return res.status(404).json({ error: "not_found" });
   const privacy = backingPrivacy(take.backings, req.user?.id);
   const backings = take.backings.map((b) => sanitizeBacking(b, req.user?.id));
   const mine = req.user?.id === take.authorId;
@@ -205,7 +222,7 @@ app.get("/v1/takes/:id", optionalAuth, async (req, res) => {
 app.get("/v1/takes/:id/agent", optionalAuth, async (req, res) => {
   const takeId = pid(req, "id");
   const take = await prisma.take.findUnique({ where: { id: takeId } });
-  if (!take) return res.status(404).json({ error: "not_found" });
+  if (!take || !canViewTake(take, req.user?.id)) return res.status(404).json({ error: "not_found" });
   const brief = await prisma.dailyBrief.findFirst({
     where: { takeId },
     orderBy: { cycle: { startedAt: "desc" } }
@@ -347,7 +364,7 @@ app.post("/v1/takes/:id/publish", requireAuth, async (req, res) => {
         researchRunId: run.id,
         targetId: target.id,
         origin: "AUTHOR",
-        receipt: { create: { canonicalJson: canonical, sha256: receipt.sha256 } }
+        receipt: { create: { canonicalJson: JSON.parse(JSON.stringify(canonical)), sha256: receipt.sha256 } }
       }
     });
     await prisma.take.update({
@@ -378,8 +395,9 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
   const parsed = backRequestSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const user = req.user!;
-  const take = await prisma.take.findUnique({ where: { id: pid(req, "id") } });
-  if (!take) return res.status(404).json({ error: "not_found" });
+  const access = await requirePublishedTake(pid(req, "id"), user.id);
+  if (!access.ok) return res.status(access.status).json({ error: access.error });
+  const take = access.take;
   if (parsed.data.level === "LIVE") {
     const live = await prisma.featureFlag.findUnique({ where: { key: "live_trading" } });
     if (!live?.enabled) return res.status(403).json({ error: "live_trading_disabled" });
@@ -471,6 +489,26 @@ app.post("/v1/pockets/:id/dry-run-invest", requireAuth, async (req, res) => {
   res.json(result);
 });
 
+app.post("/v1/pockets/:id/deposit", requireAuth, async (req, res) => {
+  const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
+  if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
+  if (owned.pocket.mode === "LIVE") return res.status(409).json({ error: "use_live_wallet" });
+  const result = await depositPaperUsd(owned.pocket.id, Number(req.body?.amountUsd));
+  if ("error" in result) return res.status(400).json({ error: result.error });
+  res.json({ ...result, kind: "paper" });
+});
+
+app.post("/v1/pockets/:id/withdraw", requireAuth, async (req, res) => {
+  const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
+  if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
+  if (owned.pocket.mode === "LIVE") return res.status(409).json({ error: "live_withdraw_disabled" });
+  const result = await withdrawPaperUsd(owned.pocket.id, Number(req.body?.amountUsd));
+  if ("error" in result) {
+    return res.status(result.error === "insufficient_cash" ? 409 : 400).json({ error: result.error });
+  }
+  res.json({ ...result, kind: "paper" });
+});
+
 app.post("/v1/pockets/:id/live-invest", requireAuth, async (req, res) => {
   const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
   if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
@@ -493,15 +531,22 @@ app.post("/v1/wallets/:id/grant", requireAuth, async (req, res) => {
   const wallet = await prisma.wallet.findFirst({ where: { id: pid(req, "id"), userId: req.user!.id } });
   if (!wallet) return res.status(404).json({ error: "not_found" });
   if (!wallet.privyWalletId) return res.status(400).json({ error: "no_privy_wallet" });
-  const contracts = Array.isArray(req.body?.allowedContracts) ? req.body.allowedContracts : [];
-  const grant = await prisma.signerGrant.create({
-    data: {
-      walletId: wallet.id,
-      privySignerId: wallet.privyWalletId,
-      allowedContracts: contracts,
-      maxPerTxUsd: env.LIVE_MAX_TRADE_USD,
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    }
+  const privySignerId = wallet.privyWalletId;
+  const contracts = liveGrantContracts(req.body?.allowedContracts, env.LIVE_ALLOWED_CONTRACTS, USDG_MAINNET);
+  const grant = await prisma.$transaction(async (tx) => {
+    await tx.signerGrant.updateMany({
+      where: { walletId: wallet.id, revokedAt: null },
+      data: { revokedAt: new Date() }
+    });
+    return tx.signerGrant.create({
+      data: {
+        walletId: wallet.id,
+        privySignerId,
+        allowedContracts: contracts,
+        maxPerTxUsd: env.LIVE_MAX_TRADE_USD,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      }
+    });
   });
   res.json({ grant });
 });
@@ -627,8 +672,9 @@ app.post("/v1/takes/:id/comments", requireAuth, async (req, res) => {
   if (/buy this now|guaranteed returns/i.test(parsed.data.body)) {
     return res.status(400).json({ error: "moderation_block", detail: "Looks like a pump, not discussion." });
   }
-  const take = await prisma.take.findUnique({ where: { id: pid(req, "id") } });
-  if (!take) return res.status(404).json({ error: "not_found" });
+  const access = await requirePublishedTake(pid(req, "id"), user.id);
+  if (!access.ok) return res.status(access.status).json({ error: access.error });
+  const take = access.take;
   const comment = await prisma.comment.create({
     data: {
       takeId: take.id,
@@ -692,35 +738,27 @@ app.post("/v1/pockets/:id/chat", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/v1/takes/:id/stance", requireAuth, async (req, res) => {
-  const parsed = stanceSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const user = req.user!;
-  const row = await prisma.takeStance.upsert({
-    where: { takeId_userId: { takeId: pid(req, "id"), userId: user.id } },
-    update: { stance: parsed.data.stance },
-    create: { takeId: pid(req, "id"), userId: user.id, stance: parsed.data.stance }
-  });
-  res.json({ stance: row });
-});
-
 app.post("/v1/takes/:id/management", requireAuth, async (req, res) => {
+  const owned = await requireTakeAuthor(req.user!.id, pid(req, "id"));
+  if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
   const mode = req.body?.mode === "AUTO" ? "AUTO" : "APPROVAL";
   const row = await prisma.takeManagement.upsert({
-    where: { takeId: pid(req, "id") },
+    where: { takeId: owned.take.id },
     update: { mode },
-    create: { takeId: pid(req, "id"), mode }
+    create: { takeId: owned.take.id, mode }
   });
   res.json({ management: row });
 });
 
-app.get("/v1/takes/:id/live", async (req, res) => {
+app.get("/v1/takes/:id/live", optionalAuth, async (req, res) => {
+  const access = await loadViewableTake(pid(req, "id"), req.user?.id);
+  if (!access.ok) return res.status(access.status).json({ error: access.error });
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   const send = async () => {
     const val = await prisma.takeValuation.findFirst({
-      where: { takeId: pid(req, "id") },
+      where: { takeId: access.take.id },
       orderBy: { asOf: "desc" }
     });
     res.write(`data: ${JSON.stringify({ type: "tick", valuation: val, at: new Date().toISOString() })}\n\n`);
@@ -823,8 +861,9 @@ app.get("/v1/circles", optionalAuth, async (req, res) => {
 
 app.post("/v1/takes/:id/counter", requireAuth, async (req, res) => {
   const user = req.user!;
-  const original = await prisma.take.findUnique({ where: { id: pid(req, "id") } });
-  if (!original) return res.status(404).json({ error: "not_found" });
+  const access = await requirePublishedTake(pid(req, "id"), user.id);
+  if (!access.ok) return res.status(access.status).json({ error: access.error });
+  const original = access.take;
   const counter = await prisma.take.create({
     data: { authorId: user.id, status: "DRAFT", parentTakeId: original.id }
   });
@@ -857,8 +896,9 @@ app.get("/v1/me/belief-map", requireAuth, async (req, res) => {
 app.post("/v1/agent/cycle/:takeId", requireAuth, async (req, res) => {
   const pause = await prisma.featureFlag.findUnique({ where: { key: "pause_agent" } });
   if (pause?.enabled) return res.status(409).json({ error: "agent_paused" });
-  const take = await prisma.take.findUnique({ where: { id: pid(req, "takeId") } });
-  if (!take) return res.status(404).json({ error: "not_found" });
+  const owned = await requireTakeAuthor(req.user!.id, pid(req, "takeId"));
+  if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
+  const take = owned.take;
   try {
     const { Queue } = await import("bullmq");
     const q = new Queue("agent", { connection: redis });
@@ -877,6 +917,7 @@ app.post("/webhooks/privy", async (req, res) => {
   res.json({ ok: true });
 });
 app.post("/webhooks/alchemy", async (req, res) => {
+  if (!verifyAlchemyWebhook(req)) return res.status(401).json({ error: "invalid_webhook" });
   await prisma.webhookDelivery.create({ data: { source: "alchemy", payload: req.body ?? {} } });
   res.json({ ok: true });
 });
@@ -906,7 +947,8 @@ export function start() {
   void refreshChainlistRpcs().then((urls) => {
     if (urls.length) log("api", "chainlist rpcs", { n: urls.length });
   });
-  app.listen(env.API_PORT, () => {
-    log("api", "listening", { port: env.API_PORT, mode: env.APP_MODE });
+  const port = Number(process.env.PORT) || env.API_PORT;
+  app.listen(port, "0.0.0.0", () => {
+    log("api", "listening", { port, mode: env.APP_MODE });
   });
 }

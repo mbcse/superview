@@ -9,6 +9,7 @@ import { screenCatalog } from "./screen.js";
 import { factsFromCompany, saveResearchNotes, thesisKey, thesisNoteFromCompany } from "./company-cache.js";
 import { clearCheckpoint, mergePicks, parseCheckpoint, patchCheckpoint } from "./checkpoint.js";
 import { runWebDiligence, runWebDiscover } from "./web-research.js";
+import { refusedSpec, shouldRefuseView } from "./view-guard.js";
 import {
   ANALYST_PROMPT,
   CRITIC_PROMPT,
@@ -72,6 +73,9 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
   let spec = interpreterSchema.safeParse(cp0.spec).success ? cp0.spec! : undefined;
   if (spec) {
     await emit("interpret", "Reusing thesis from the last attempt");
+  } else if (shouldRefuseView(view)) {
+    spec = refusedSpec(view);
+    await emit("interpret", "This is not a readable view");
   } else {
     await emit("interpret", "Reading your view");
     spec = await genObject({
@@ -375,7 +379,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
       return {
         tokenId: s.u.tokenId,
         symbol: s.u.symbol,
-        actionId: s.item.role,
+        actionId: s.u.tokenId,
         sector: s.u.sector ?? undefined,
         exposure: s.item.exposurePurity * s.item.directness,
         confidence: s.item.confidence,
@@ -397,7 +401,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
       scored.slice(0, 12).map((s) => ({
         tokenId: s.u.tokenId,
         symbol: s.u.symbol,
-        actionId: s.item.role,
+        actionId: s.u.tokenId,
         sector: s.u.sector ?? undefined,
         exposure: Math.max(0.3, s.item.exposurePurity),
         confidence: Math.max(0.4, s.item.confidence),
