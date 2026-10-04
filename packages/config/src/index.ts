@@ -45,8 +45,32 @@ export const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+function hostUrl(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  const withScheme = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const url = new URL(withScheme);
+    if (!url.hostname) return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolvePublicUrl(
+  explicit: string | undefined,
+  hosts: Array<string | undefined>,
+  fallback: string
+): string {
+  return hostUrl(explicit) ?? hosts.map(hostUrl).find(Boolean) ?? fallback;
+}
+
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  const parsed = envSchema.safeParse(source);
+  const next = { ...source };
+  next.API_ORIGIN = resolvePublicUrl(source.API_ORIGIN, [source.RAILWAY_PUBLIC_DOMAIN, source.RAILWAY_STATIC_URL], "http://localhost:4000");
+  next.WEB_ORIGIN = resolvePublicUrl(source.WEB_ORIGIN, [], "http://localhost:3000");
+  const parsed = envSchema.safeParse(next);
   if (!parsed.success) {
     throw new Error(`Invalid environment: ${parsed.error.message}`);
   }
