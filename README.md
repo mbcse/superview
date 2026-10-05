@@ -180,6 +180,8 @@ Use **Docker**, not Railpack (repo root looks like Next.js). Leave Railway **Roo
 ```
 NEXT_PUBLIC_API_ORIGIN=https://api.yourdomain.com
 NEXT_PUBLIC_PRIVY_APP_ID=
+NEXT_PUBLIC_POSTHOG_KEY=phc_5918n4s3UPJOIawjTciuy5YrGdotlvB1dTpoZFPTdkM
+NEXT_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
 **Railway**

@@ -27,6 +27,7 @@
     "next": "^15.1.6",
     "nuqs": "^2.10.1",
     "postcss": "^8.5.28",
+    "posthog-js": "^1.435.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.89.0",

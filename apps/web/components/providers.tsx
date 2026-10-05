@@ -5,6 +5,7 @@ import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { PrivyProvider } from "@privy-io/react-auth";
 import { useState, type ReactNode } from "react";
 import { DemoAuthProvider, PrivyAuthProvider } from "./auth-provider";
+import { PostHogProvider } from "./posthog-provider";
 import { PriceStreamProvider } from "./social/price-stream";
 import { StockSheetProvider } from "./social/stock-sheet";
 import { ViewCommentsProvider } from "./social/view-chat";
@@ -16,11 +17,13 @@ export function Providers({ children }: { children: ReactNode }) {
   const tree = (
     <QueryClientProvider client={client}>
       <NuqsAdapter>
-        <PriceStreamProvider>
-          <StockSheetProvider>
-            <ViewCommentsProvider>{children}</ViewCommentsProvider>
-          </StockSheetProvider>
-        </PriceStreamProvider>
+        <PostHogProvider>
+          <PriceStreamProvider>
+            <StockSheetProvider>
+              <ViewCommentsProvider>{children}</ViewCommentsProvider>
+            </StockSheetProvider>
+          </PriceStreamProvider>
+        </PostHogProvider>
       </NuqsAdapter>
     </QueryClientProvider>
   );

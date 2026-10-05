@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { prefetchDNS, preconnect } from "react-dom";
 import localFont from "next/font/local";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
@@ -31,6 +32,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { themeColor: "#F7FAFB" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  prefetchDNS("https://us.i.posthog.com");
+  preconnect("https://us.i.posthog.com");
   return (
     <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable} ${saans.variable}`}>
       <body className="font-sans">

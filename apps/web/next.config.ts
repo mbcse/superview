@@ -28,7 +28,10 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_API_ORIGIN:
       process.env.NEXT_PUBLIC_API_ORIGIN ?? process.env.API_ORIGIN ?? "http://localhost:4000",
-    NEXT_PUBLIC_PRIVY_APP_ID: privyAppId
+    NEXT_PUBLIC_PRIVY_APP_ID: privyAppId,
+    NEXT_PUBLIC_POSTHOG_KEY:
+      process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "phc_5918n4s3UPJOIawjTciuy5YrGdotlvB1dTpoZFPTdkM",
+    NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com"
   },
   async redirects() {
     return [
