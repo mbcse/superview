@@ -2,12 +2,38 @@ node_modules
 dist
 .next
 .turbo
-.env
-.env.local
 coverage
 *.log
 .DS_Store
 apps/web/.next
+apps/web/tsconfig.tsbuildinfo
 packages/db/generated
 .pgdata
+*.tsbuildinfo
 
+# Secrets and local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+credentials.json
+secrets.json
+
+# Internal agent / editor / review docs (keep local, do not push)
+AGENTS.md
+HACKATHON-REVIEW.md
+CLAUDE.md
+GEMINI.md
+.agents/
+.cursor/
+.vscode/
+.idea/
+.claude/
+.codex/
+.impeccable/
+.omc/
+.cache/
+skills-lock.json
+ops/
