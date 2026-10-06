@@ -1,0 +1,441 @@
+/* Belief languages / astrology wedge — between solution and product flow */
+
+.investor-belief {
+    --belief-amber: #FF9500;
+    --belief-ink: rgba(255, 255, 255, 0.92);
+    --belief-mute: rgba(255, 255, 255, 0.55);
+    justify-content: safe center;
+    align-items: stretch;
+    gap: clamp(1.1rem, 2.4vh, 1.75rem);
+    padding-top: clamp(1.4rem, 2.6vh, 2.1rem);
+    padding-bottom: clamp(1.6rem, 3vh, 2.4rem);
+}
+
+.investor-belief .belief-glow {
+    position: absolute;
+    inset: auto;
+    top: -18%;
+    right: -8%;
+    width: min(48vw, 560px);
+    height: min(42vh, 420px);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 149, 0, 0.16) 0%, transparent 70%);
+    filter: blur(70px);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.investor-belief .belief-glow--bl {
+    top: auto;
+    right: auto;
+    bottom: -22%;
+    left: -10%;
+    background: radial-gradient(circle, rgba(139, 92, 246, 0.14) 0%, transparent 72%);
+}
+
+.belief-shell {
+    position: relative;
+    z-index: 1;
+    width: min(1480px, 100%);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(1.1rem, 2.2vh, 1.65rem);
+}
+
+.belief-head {
+    width: 100%;
+    max-width: min(980px, 100%);
+    text-align: left;
+}
+
+.belief-head h2 {
+    margin: 0;
+    font-size: clamp(1.85rem, 3.4vw, 2.75rem);
+    line-height: 1.1;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    color: #fff;
+}
+
+.belief-head p {
+    margin: 0.85rem 0 0;
+    max-width: 44rem;
+    color: var(--belief-mute);
+    font-size: clamp(0.95rem, 1.2vw, 1.08rem);
+    line-height: 1.5;
+    font-weight: 500;
+}
+
+.belief-dialects {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+}
+
+.belief-dialect {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 2.05rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.belief-dialect--hot {
+    border-color: rgba(255, 149, 0, 0.45);
+    background: rgba(255, 149, 0, 0.1);
+    color: #FFB347;
+}
+
+.belief-dialect__dot {
+    width: 0.42rem;
+    height: 0.42rem;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 10px currentColor;
+}
+
+.belief-stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) auto minmax(0, 1.15fr);
+    gap: clamp(0.85rem, 1.6vw, 1.35rem);
+    align-items: stretch;
+}
+
+.belief-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: clamp(1.1rem, 2vw, 1.45rem);
+    border-radius: 1.15rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background:
+        linear-gradient(165deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)),
+        rgba(8, 8, 10, 0.55);
+    overflow: hidden;
+    min-height: clamp(220px, 32vh, 300px);
+}
+
+.belief-card--sky {
+    border-color: rgba(139, 92, 246, 0.28);
+    background:
+        radial-gradient(ellipse 90% 70% at 12% 0%, rgba(139, 92, 246, 0.18), transparent 55%),
+        linear-gradient(165deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+}
+
+.belief-card--book {
+    gap: 0.7rem;
+    border-color: rgba(255, 149, 0, 0.34);
+    background:
+        radial-gradient(ellipse 70% 55% at 100% 0%, rgba(255, 149, 0, 0.16), transparent 52%),
+        linear-gradient(180deg, rgba(18, 14, 10, 0.92), rgba(8, 8, 10, 0.88));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 180, 80, 0.08),
+        0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.belief-card__label {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 0.28rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #FFB347;
+    border: 1px solid rgba(255, 149, 0, 0.4);
+    background: rgba(255, 149, 0, 0.08);
+}
+
+.belief-card--sky .belief-card__label {
+    color: #C4B5FD;
+    border-color: rgba(167, 139, 250, 0.45);
+    background: rgba(139, 92, 246, 0.12);
+}
+
+.belief-card__quote {
+    margin: 0;
+    color: #fff;
+    font-size: clamp(1.2rem, 1.95vw, 1.55rem);
+    line-height: 1.32;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+}
+
+.belief-card__note {
+    margin-top: auto;
+    color: var(--belief-mute);
+    font-size: 0.86rem;
+    line-height: 1.45;
+}
+
+.belief-bridge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    color: rgba(255, 255, 255, 0.45);
+    align-self: center;
+}
+
+.belief-bridge svg {
+    width: 1.65rem;
+    height: 1.65rem;
+}
+
+.belief-bridge span {
+    font-size: 0.62rem;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 180, 80, 0.85);
+    text-align: center;
+    max-width: 6.5rem;
+    line-height: 1.3;
+}
+
+.belief-book__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.belief-book__meta {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.belief-holdings {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin: 0;
+    padding: 0.55rem;
+    list-style: none;
+    border-radius: 0.9rem;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(0, 0, 0, 0.38);
+}
+
+.belief-holdings li {
+    display: grid;
+    grid-template-columns: 3.15rem minmax(0, 1fr);
+    gap: 0.7rem;
+    align-items: center;
+    padding: 0.55rem 0.6rem;
+    border-radius: 0.7rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.belief-holdings li:hover {
+    background: rgba(255, 149, 0, 0.06);
+    border-color: rgba(255, 149, 0, 0.18);
+}
+
+.belief-holding__mark {
+    display: grid;
+    place-items: center;
+    width: 3.15rem;
+    height: 3.15rem;
+    border-radius: 0.7rem;
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72rem;
+    font-weight: 750;
+    letter-spacing: 0.02em;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.belief-holding__mark[data-tone="fire"] {
+    color: #FFD4A8;
+    border-color: rgba(255, 106, 26, 0.45);
+    background:
+        radial-gradient(circle at 30% 25%, rgba(255, 149, 0, 0.35), transparent 65%),
+        rgba(255, 59, 48, 0.16);
+}
+
+.belief-holding__mark[data-tone="metal"] {
+    color: #E8D5A3;
+    border-color: rgba(212, 175, 55, 0.4);
+    background:
+        radial-gradient(circle at 30% 25%, rgba(212, 175, 55, 0.28), transparent 65%),
+        rgba(120, 90, 30, 0.22);
+}
+
+.belief-holding__mark[data-tone="build"] {
+    color: #FFC98A;
+    border-color: rgba(255, 149, 0, 0.4);
+    background:
+        radial-gradient(circle at 30% 25%, rgba(255, 149, 0, 0.28), transparent 65%),
+        rgba(80, 45, 10, 0.35);
+}
+
+.belief-holding__body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+}
+
+.belief-holding__row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.65rem;
+}
+
+.belief-holding__row strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.88rem;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    color: rgba(255, 255, 255, 0.94);
+}
+
+.belief-holding__row b {
+    flex-shrink: 0;
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.84rem;
+    font-weight: 700;
+    color: #FFB347;
+    font-variant-numeric: tabular-nums;
+}
+
+.belief-holding__thesis {
+    font-size: 0.72rem;
+    line-height: 1.25;
+    color: rgba(255, 255, 255, 0.48);
+    letter-spacing: 0.01em;
+}
+
+.belief-holding__bar {
+    height: 5px;
+    margin-top: 0.12rem;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+
+.belief-holding__bar i {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #FF3B30 0%, #FF9500 100%);
+    transition: width 0.75s cubic-bezier(0.23, 1, 0.32, 1);
+    transition-delay: calc(var(--i, 0) * 90ms + 180ms);
+}
+
+.slide.active .belief-holding__bar i {
+    width: var(--w, 20%);
+}
+
+.belief-book__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-top: auto;
+    padding-top: 0.15rem;
+}
+
+.belief-book__alloc {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.78rem;
+    font-weight: 550;
+}
+
+.belief-book__alloc b {
+    color: rgba(255, 255, 255, 0.92);
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    margin-right: 0.2rem;
+}
+
+.belief-book__gate {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.28rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid rgba(52, 211, 153, 0.35);
+    background: rgba(52, 211, 153, 0.1);
+    color: #6EE7B7;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.belief-book__gate::before {
+    content: "";
+    width: 0.38rem;
+    height: 0.38rem;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 8px currentColor;
+}
+
+.belief-lock {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem 1.1rem;
+    align-items: center;
+    padding-top: 0.15rem;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: clamp(0.82rem, 1.05vw, 0.94rem);
+    line-height: 1.4;
+}
+
+.belief-lock strong {
+    color: rgba(255, 255, 255, 0.88);
+    font-weight: 700;
+}
+
+.belief-lock em {
+    font-style: normal;
+    color: #FF9500;
+    font-weight: 700;
+}
+
+@media (max-width: 980px) {
+    .belief-stage {
+        grid-template-columns: 1fr;
+    }
+
+    .belief-bridge {
+        flex-direction: row;
+        padding: 0.2rem 0;
+    }
+
+    .belief-bridge span {
+        max-width: none;
+    }
+
+    .belief-bridge svg {
+        transform: rotate(90deg);
+    }
+}

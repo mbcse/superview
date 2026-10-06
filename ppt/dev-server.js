@@ -5,7 +5,7 @@ const url = require('url');
 
 const root = __dirname;
 const preferred = Number(process.env.PORT || 4173);
-const extra = Number(process.env.EXTRA_PORT || 3000);
+const extra = Number(process.env.EXTRA_PORT || 3300);
 const clients = new Set();
 
 const types = {

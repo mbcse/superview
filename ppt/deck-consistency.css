@@ -1,0 +1,229 @@
+/*
+ * Narrative deck rhythm — slides 2–5, 10–13 only.
+ * Does NOT target: .investor-hero (1), .investor-proof (6–9).
+ *
+ * Rules:
+ * 1) Headers centered
+ * 2) Headline accents = red → orange gradient
+ * 3) Kickers / tags = same red-orange mix
+ */
+
+:root {
+    --deck-hot: #FF3B30;
+    --deck-signal: #FF9500;
+    --deck-mix: #FF6A1A;
+    --deck-mix-rgb: 255, 106, 26;
+    --deck-hot-rgb: 255, 59, 48;
+    --deck-signal-rgb: 255, 149, 0;
+}
+
+/* ── Shared accent text ─────────────────────────────────────────────── */
+
+.investor-survey .problem-header__line--accent,
+.investor-solution .team-accent,
+.investor-belief .team-accent,
+.investor-product-flow .pf-head__line--accent,
+.investor-capabilities .team-accent,
+.investor-market .team-accent,
+.investor-competitive .team-accent,
+.investor-team .team-accent {
+    background: linear-gradient(135deg, var(--deck-hot) 0%, var(--deck-signal) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+/* Close line stays solid white bold — not gradient */
+.investor-close .close-cta {
+    background: none !important;
+    -webkit-background-clip: unset !important;
+    background-clip: unset !important;
+    -webkit-text-fill-color: #fff !important;
+    color: #fff !important;
+    font-weight: 800;
+}
+
+/* ── Shared kicker / tag chip ───────────────────────────────────────── */
+
+.investor-survey .survey-kicker,
+.investor-solution .survey-kicker,
+.investor-belief .survey-kicker,
+.investor-capabilities .capability-tag,
+.investor-capabilities .capability-lead .capability-tag,
+.investor-competitive .competitive-tag,
+.investor-market .market-section-label--accent {
+    color: var(--deck-mix) !important;
+    background: rgba(var(--deck-hot-rgb), 0.1) !important;
+    border: 1px solid rgba(var(--deck-signal-rgb), 0.35) !important;
+    border-radius: 999px;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+/* Close kicker = plain orange line like NodeRails close (not a chip) */
+.investor-close .close-kicker {
+    display: block !important;
+    margin: 0 auto 1.35rem !important;
+    padding: 0 !important;
+    background: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    color: #FF9500 !important;
+    font-size: clamp(1rem, 1.85vh, 1.2rem) !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.14em !important;
+    text-transform: uppercase !important;
+    line-height: 1.25 !important;
+}
+
+/* Problem kicker already uses survey-kicker class */
+
+/* ── Header alignment: centered across narrative boards ─────────────── */
+
+.investor-survey .problem-header {
+    align-items: flex-start !important;
+    text-align: left !important;
+}
+
+.investor-survey .problem-header h2 {
+    text-align: left !important;
+    white-space: normal;
+}
+
+.investor-survey .problem-glow {
+    display: block !important;
+}
+
+.investor-solution .solution-head {
+    text-align: center;
+    max-width: min(920px, 100%);
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.investor-solution .solution-head p {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.investor-belief .belief-head {
+    text-align: left;
+    max-width: min(920px, 100%);
+}
+
+.investor-belief .belief-head h2 {
+    text-align: left;
+}
+
+.investor-product-flow .pf-head {
+    text-align: center;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.investor-product-flow .pf-head h2 {
+    align-items: center;
+}
+
+.investor-product-flow .pf-head p {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.investor-capabilities .investor-header {
+    text-align: center;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.investor-capabilities .investor-header h2 {
+    margin-left: auto;
+    margin-right: auto;
+    max-width: min(920px, 100%);
+}
+
+.investor-capabilities .capability-subline {
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+}
+
+/*
+ * Slides 10–12: left headings, same content column as team cards
+ * (header left edge = Mohit card / board left edge)
+ */
+.investor-market .investor-header,
+.investor-competitive .investor-header,
+.investor-team .investor-header {
+    width: 100%;
+    max-width: min(1480px, 100%);
+    margin-left: auto;
+    margin-right: auto;
+    text-align: left;
+}
+
+.investor-market .investor-header h2,
+.investor-competitive .investor-header h2,
+.investor-team .investor-header h2 {
+    margin-left: 0;
+    margin-right: 0;
+    max-width: none;
+    text-align: left;
+}
+
+.investor-competitive .competitive-subline {
+    margin-left: 0;
+    margin-right: 0;
+    max-width: min(860px, 100%);
+    text-align: left;
+}
+
+.investor-market .market-shell,
+.investor-competitive .competitive-layout,
+.investor-team .team-strip-board {
+    width: 100%;
+    max-width: min(1480px, 100%);
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Competitive header sits above layout — match the same column */
+.investor-competitive .investor-header {
+    width: 100%;
+    max-width: min(1480px, 100%);
+}
+
+.investor-close {
+    text-align: center;
+}
+
+.investor-close .close-kicker {
+    display: block;
+    margin-bottom: 1.35rem;
+    padding: 0;
+    font-size: clamp(1rem, 1.85vh, 1.2rem);
+}
+
+/* Lead cards: same red-orange edge language (not pure red vs pure orange) */
+.investor-capabilities .capability-lead {
+    background: linear-gradient(180deg, rgba(var(--deck-hot-rgb), 0.16), rgba(255, 255, 255, 0.06));
+    border-color: rgba(var(--deck-signal-rgb), 0.32);
+}
+
+.investor-competitive .competitive-win-card--highlight {
+    border-color: rgba(var(--deck-hot-rgb), 0.4);
+    border-top-color: var(--deck-mix);
+    background:
+        linear-gradient(180deg, rgba(var(--deck-hot-rgb), 0.1), rgba(255, 255, 255, 0.04)),
+        rgba(255, 255, 255, 0.05);
+}
+
+.investor-market .market-distribution .market-layer--base {
+    border-left-color: rgba(var(--deck-hot-rgb), 0.85);
+}
+
+.investor-market .market-distribution .market-layer--growth {
+    border-left-color: rgba(var(--deck-signal-rgb), 0.85);
+}
