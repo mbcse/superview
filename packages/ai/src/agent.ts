@@ -3,7 +3,7 @@ import { prisma } from "@takeandstake/db";
 import { applyGuardrails, executePaperRebalance, publicCommentBody } from "@takeandstake/core";
 import { genObject } from "./generate.js";
 import { criticModel, researchModel, socialModel } from "./llm.js";
-import { fill, MANUS_MEMO_PROMPT, MONITOR_PROMPT, THREAD_REPLY_PROMPT } from "./prompts/index.js";
+import { fill, MANUS_MEMO_PROMPT, MONITOR_PROMPT, THREAD_REPLY_PROMPT, astrologyCanonExcerpt } from "./prompts/index.js";
 import { monitorSchema, threadReplySchema } from "./prompts/schemas.js";
 import { runWebNews } from "./web-research.js";
 
@@ -23,6 +23,15 @@ export async function runDailyMonitor(takeId: string) {
   if (!take) throw new Error("take_not_found");
   const rev = take.revisions[0];
   const holdings = rev?.target?.holdings ?? [];
+  const sky =
+    take.lens === "SKY"
+      ? JSON.stringify({
+          system: take.astrologySystem ?? "WESTERN",
+          chart: rev?.astrologyChart ?? "",
+          date: new Date().toISOString().slice(0, 10),
+          canon: astrologyCanonExcerpt(take.astrologySystem === "VEDIC" ? "VEDIC" : "WESTERN")
+        })
+      : "";
   let evidence = "";
   try {
     evidence = await runWebNews(
@@ -45,6 +54,7 @@ export async function runDailyMonitor(takeId: string) {
       thesis: JSON.stringify({ sentence: rev?.sentence, thesis: rev?.researchRun?.thesis }),
       positions: JSON.stringify(holdings.map((h) => ({ symbol: h.token.symbol, weightBps: h.weightBps }))),
       evidence,
+      sky,
       mandate: mandateLabel,
       driftThreshold: "200 bps"
     })

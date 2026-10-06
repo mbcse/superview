@@ -1,4 +1,5 @@
 import { prisma } from "@takeandstake/db";
+import { displaySymbol, robinhoodAliases } from "@takeandstake/shared";
 
 export type TokenCard = {
   symbol: string;
@@ -8,6 +9,7 @@ export type TokenCard = {
   industry: string | null;
   logoUrl: string | null;
   about: string | null;
+  listings?: Array<{ id: string; symbol: string; chainId: number; source: string; contractAddress: string }>;
 };
 
 export function isJunkAbout(text: string) {
@@ -38,9 +40,7 @@ export function cleanAbout(raw: unknown): string | null {
 }
 
 function symbolsFor(raw: string) {
-  const u = raw.trim().toUpperCase();
-  const bare = u.replace(/^RH/, "");
-  return [...new Set([u, bare, bare ? `RH${bare}` : ""].filter(Boolean))];
+  return robinhoodAliases(raw.trim());
 }
 
 export async function loadTokenCard(symbol: string): Promise<{ card: TokenCard; tokenId: string } | null> {
@@ -52,19 +52,32 @@ export async function loadTokenCard(symbol: string): Promise<{ card: TokenCard; 
   });
   const token = tokens.find((t) => t.universe) ?? tokens[0];
   if (!token) return null;
+  const siblings = token.isin
+    ? await prisma.stockToken.findMany({
+        where: { isin: token.isin, status: "ACTIVE" },
+        select: { id: true, symbol: true, chainId: true, source: true, contractAddress: true }
+      })
+    : tokens.map((t) => ({ id: t.id, symbol: t.symbol, chainId: t.chainId, source: t.source, contractAddress: t.contractAddress }));
   const u = token.universe;
   const about = cleanAbout(u?.businessSummary) ?? cleanAbout(u?.profile);
-  const name = (u?.legalName || token.name || token.symbol.replace(/^RH/, "")).trim();
+  const name = (u?.legalName || token.name || displaySymbol(token)).trim();
   return {
     tokenId: token.id,
     card: {
-      symbol: token.symbol.replace(/^RH/, ""),
+      symbol: displaySymbol(token),
       name,
       legalName: u?.legalName ?? null,
       sector: u?.sector ?? null,
       industry: u?.industry ?? null,
       logoUrl: token.logoUrl ?? null,
-      about
+      about,
+      listings: siblings.map((t) => ({
+        id: t.id,
+        symbol: displaySymbol(t),
+        chainId: t.chainId,
+        source: t.source,
+        contractAddress: t.contractAddress
+      }))
     }
   };
 }

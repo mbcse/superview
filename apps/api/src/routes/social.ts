@@ -2,7 +2,7 @@ import { Router } from "express";
 import { Queue } from "bullmq";
 import { prisma } from "@takeandstake/db";
 import { serializeFeedTake, asNum, backingPrivacy, threadComments, windowExcessVsSpy, rangeSince } from "@takeandstake/core";
-import { commentSchema, stanceSchema } from "@takeandstake/shared";
+import { commentSchema, stanceSchema, parseWorld } from "@takeandstake/shared";
 import { optionalAuth, requireAuth } from "../middleware/auth.js";
 import { canViewTake, requirePublishedTake } from "../take-access.js";
 import { redis } from "../redis.js";
@@ -19,6 +19,8 @@ export const socialRouter = Router();
 socialRouter.get("/v1/feed", optionalAuth, async (req, res) => {
   const tab = String(req.query.tab ?? "for-you");
   const q = String(req.query.q ?? "").trim();
+  const world = parseWorld(req.query.world);
+  const chainRaw = req.query.chainId != null ? Number(req.query.chainId) : undefined;
   const followSet = new Set<string>();
   if (req.user) {
     const follows = await prisma.follow.findMany({
@@ -35,6 +37,7 @@ socialRouter.get("/v1/feed", optionalAuth, async (req, res) => {
     ? {
         OR: [
           { revisions: { some: { sentence: { contains: q, mode: "insensitive" as const } } } },
+          { revisions: { some: { astrologyChart: { contains: q, mode: "insensitive" as const } } } },
           { author: { handle: { contains: q, mode: "insensitive" as const } } },
           { author: { displayName: { contains: q, mode: "insensitive" as const } } },
           {
@@ -48,7 +51,14 @@ socialRouter.get("/v1/feed", optionalAuth, async (req, res) => {
       }
     : {};
   const takes = await prisma.take.findMany({
-    where: { status: "PUBLISHED", visibility: "PUBLIC", ...authorFilter, ...searchFilter },
+    where: {
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      world,
+      ...(Number.isFinite(chainRaw) ? { chainId: chainRaw } : {}),
+      ...authorFilter,
+      ...searchFilter
+    },
     include: {
       author: true,
       revisions: {
@@ -85,10 +95,12 @@ socialRouter.get("/v1/feed", optionalAuth, async (req, res) => {
 socialRouter.get("/v1/leaderboard", optionalAuth, async (req, res) => {
   const period = String(req.query.period ?? "1M");
   const q = String(req.query.q ?? "").trim();
+  const world = parseWorld(req.query.world);
   const searchFilter = q
     ? {
         OR: [
           { revisions: { some: { sentence: { contains: q, mode: "insensitive" as const } } } },
+          { revisions: { some: { astrologyChart: { contains: q, mode: "insensitive" as const } } } },
           { author: { handle: { contains: q, mode: "insensitive" as const } } },
           { author: { displayName: { contains: q, mode: "insensitive" as const } } },
           {
@@ -102,7 +114,7 @@ socialRouter.get("/v1/leaderboard", optionalAuth, async (req, res) => {
       }
     : {};
   const takes = await prisma.take.findMany({
-    where: { status: "PUBLISHED", visibility: { in: ["PUBLIC", "UNLISTED"] }, ...searchFilter },
+    where: { status: "PUBLISHED", visibility: "PUBLIC", world, ...searchFilter },
     include: {
       author: true,
       revisions: { orderBy: { number: "desc" }, take: 1, include: { target: { include: { holdings: { include: { token: true } } } } } },
@@ -126,6 +138,13 @@ socialRouter.get("/v1/leaderboard", optionalAuth, async (req, res) => {
   );
   const marksById = new Map(windowMarks.map((m) => [m.id, m.rows]));
   const ranked = takes
+    .filter((t) => {
+      const holdings = t.revisions[0]?.target?.holdings ?? [];
+      const noExit = holdings
+        .filter((h) => Boolean((h.token.riskFlags as { noExit?: boolean } | null)?.noExit))
+        .reduce((s, h) => s + h.weightBps, 0);
+      return noExit <= 1_000;
+    })
     .map((t) => {
       const row = serializeFeedTake(t, req.user?.id);
       const excess = windowExcessVsSpy(marksById.get(t.id) ?? [], period);
@@ -203,12 +222,23 @@ socialRouter.post("/v1/takes/:id/fork", requireAuth, async (req, res) => {
     include: { revisions: { orderBy: { number: "desc" }, take: 1 } }
   });
   if (!original) return res.status(404).json({ error: "not_found" });
-  const fork = await prisma.take.create({ data: { authorId: req.user!.id, status: "DRAFT" } });
+  const fork = await prisma.take.create({
+    data: {
+      authorId: req.user!.id,
+      status: "DRAFT",
+      world: original.world,
+      chainId: original.chainId,
+      lens: original.lens,
+      astrologySystem: original.astrologySystem,
+      parentTakeId: original.id
+    }
+  });
   await prisma.takeRevision.create({
     data: {
       takeId: fork.id,
       number: 1,
       sentence: original.revisions[0]?.sentence ?? "Copied view",
+      astrologyChart: original.revisions[0]?.astrologyChart,
       origin: "AUTHOR"
     }
   });

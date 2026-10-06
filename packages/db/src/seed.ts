@@ -43,6 +43,11 @@ const VIEWS: Array<{
   symbols: Array<{ symbol: string; weightBps: number; why: string }>;
   cashBps: number;
   alpha: number;
+  world?: "STOCKS" | "MEMES";
+  chainId?: number;
+  lens?: "BELIEF" | "SKY";
+  astrologySystem?: "VEDIC" | "WESTERN";
+  astrologyChart?: string;
 }> = [
   {
     handle: "demo",
@@ -121,6 +126,23 @@ const VIEWS: Array<{
       { symbol: "GOOGL", weightBps: 3200, why: "Search and YouTube still collect the rent." },
       { symbol: "AAPL", weightBps: 1600, why: "Services tax on the same hours." }
     ]
+  },
+  {
+    handle: "mira",
+    sentence: "Labor stays tight and wages keep pressure on operating costs.",
+    lens: "SKY",
+    astrologySystem: "VEDIC",
+    astrologyChart:
+      "Saturn transits the 10th. Sade Sati on the mundane labor house. Mars aspects the 6th of employment. Current dasha favors Shani.",
+    horizon: "3y",
+    falsifier: "Unemployment rises for two consecutive years while wage growth cools below inflation.",
+    cashBps: 800,
+    alpha: 0.06,
+    symbols: [
+      { symbol: "AMZN", weightBps: 3400, why: "Fulfillment labor is the wage bill that Saturn on the 10th describes." },
+      { symbol: "MSFT", weightBps: 3000, why: "Enterprise software sits next to scarce skilled labor." },
+      { symbol: "META", weightBps: 1800, why: "Hiring cycles and ad labor follow the same tightness." }
+    ]
   }
 ];
 
@@ -156,6 +178,10 @@ async function resolveToken(symbol: string, name: string, allowCreate: boolean) 
       name,
       contractAddress: seedAddress(symbol),
       chainId: 4663,
+      world: "STOCKS",
+      source: "ROBINHOOD",
+      venue: "RH_BOOK",
+      decimals: 18,
       status: "ACTIVE",
       universe: {
         create: {
@@ -211,6 +237,10 @@ async function seedView(
       authorId,
       status: "PUBLISHED",
       visibility: "PUBLIC",
+      world: view.world ?? "STOCKS",
+      chainId: view.chainId ?? (view.world === "MEMES" ? 101 : 4663),
+      lens: view.lens ?? "BELIEF",
+      astrologySystem: view.astrologySystem,
       seeded: true,
       createdAt: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
     }
@@ -257,6 +287,7 @@ async function seedView(
       sentence: view.sentence,
       horizon: view.horizon,
       falsifier: view.falsifier,
+      astrologyChart: view.astrologyChart,
       origin: "AUTHOR",
       targetId: target.id,
       researchRunId: run?.id,
@@ -310,7 +341,10 @@ async function main() {
       { key: "deep_research", enabled: true },
       { key: "daily_cycles", enabled: true },
       { key: "pause_trading", enabled: false },
-      { key: "pause_agent", enabled: false }
+      { key: "pause_agent", enabled: false },
+      { key: "live_trading_xstocks", enabled: false },
+      { key: "live_trading_memes", enabled: false },
+      { key: "live_rh_bags", enabled: false }
     ],
     skipDuplicates: true
   });
@@ -340,12 +374,94 @@ async function main() {
     if (take) published += 1;
   }
 
+  const memeTokens = await ensureMemeTokens();
+  const memeViews = memeViewSpecs(memeTokens);
+  for (const view of memeViews) {
+    const authorId = users.get(view.handle);
+    if (!authorId) continue;
+    const take = await seedView(authorId, view, memeTokens);
+    if (take) published += 1;
+  }
+
   await prisma.take.updateMany({
-    where: { revisions: { some: { sentence: { in: VIEWS.map((v) => v.sentence) } } } },
+    where: { revisions: { some: { sentence: { in: [...VIEWS, ...memeViews].map((v) => v.sentence) } } } },
     data: { seeded: true }
   });
 
   console.log(`Seeded flags, ${users.size} users, ${published} published views. Seeded charts are illustrative. live_trading stays off.`);
+}
+
+async function ensureMemeTokens() {
+  const existing = await prisma.stockToken.findMany({
+    where: { world: "MEMES", status: "ACTIVE" },
+    orderBy: { updatedAt: "desc" },
+    take: 12
+  });
+  if (existing.length >= 3) {
+    return new Map(existing.map((t) => [t.symbol, { id: t.id, symbol: t.symbol }]));
+  }
+  const fallback = [
+    { symbol: "DOGE", name: "Dog culture", mint: "DoGe1111111111111111111111111111111111112" },
+    { symbol: "FROG", name: "Frog culture", mint: "Fr0g1111111111111111111111111111111111112" },
+    { symbol: "CAT", name: "Cat culture", mint: "Catt1111111111111111111111111111111111112" }
+  ];
+  const tokens = new Map<string, { id: string; symbol: string }>();
+  for (const row of existing) tokens.set(row.symbol, { id: row.id, symbol: row.symbol });
+  for (const t of fallback) {
+    if (tokens.size >= 6) break;
+    const created = await prisma.stockToken.upsert({
+      where: { chainId_contractAddress: { chainId: 101, contractAddress: t.mint } },
+      update: { world: "MEMES", source: "PUMPFUN", venue: "PUMP_CURVE", status: "ACTIVE" },
+      create: {
+        symbol: t.symbol,
+        name: t.name,
+        contractAddress: t.mint,
+        chainId: 101,
+        world: "MEMES",
+        source: "PUMPFUN",
+        venue: "PUMP_CURVE",
+        decimals: 6,
+        status: "ACTIVE",
+        liquidityUsd: 120_000
+      }
+    });
+    tokens.set(created.symbol, { id: created.id, symbol: created.symbol });
+  }
+  return tokens;
+}
+
+function memeViewSpecs(tokens: Map<string, { id: string; symbol: string }>) {
+  const symbols = [...tokens.keys()].slice(0, 6);
+  const take3 = (offset: number) =>
+    symbols.slice(offset, offset + 3).map((symbol, i) => ({
+      symbol,
+      weightBps: i === 0 ? 4000 : i === 1 ? 3200 : 2000,
+      why: "Fits the launch narrative."
+    }));
+  return [
+    {
+      handle: "kai",
+      sentence: "Launchpads will keep minting culture coins.",
+      horizon: "30d",
+      falsifier: "New launches dry up for two weeks.",
+      cashBps: 800,
+      alpha: 0.28,
+      world: "MEMES" as const,
+      chainId: 101,
+      symbols: take3(0)
+    },
+    {
+      handle: "mira",
+      sentence: "Dogs and frogs still run the timeline.",
+      horizon: "14d",
+      falsifier: "Animal coins lose the top of the tape.",
+      cashBps: 600,
+      alpha: 0.15,
+      world: "MEMES" as const,
+      chainId: 101,
+      symbols: take3(symbols.length > 3 ? 1 : 0)
+    }
+  ].filter((v) => v.symbols.length >= 3);
 }
 
 main()

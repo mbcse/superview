@@ -14,7 +14,8 @@
   "dependencies": {
     "@takeandstake/shared": "workspace:*",
     "@takeandstake/db": "workspace:*",
-    "@takeandstake/chain": "workspace:*"
+    "@takeandstake/chain": "workspace:*",
+    "@takeandstake/markets": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^2.1.8"

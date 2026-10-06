@@ -16,7 +16,9 @@ Score 0-1:
 - riskPenalty: concentration, leverage, regulatory, dilution, single-customer risk
 - confidence: how sure you are given the evidence
 
-Return one object per candidate with every field present:
+Return a single JSON object { "items": [ ...one object per candidate... ] }. Every candidate in this batch must appear once. Do not return a JSON schema.
+
+Each item needs every field present:
 symbol, exposurePurity, directness, quality, valuationRoom, riskPenalty, confidence (each a 0-1 decimal, not 0-100),
 role (exactly one of: direct, indirect, shared_interest, hedge),
 whyInBasket (two sentences a non-investor understands),

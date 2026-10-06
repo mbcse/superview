@@ -1,5 +1,5 @@
 import { constructPortfolio, type HoldingRole } from "@takeandstake/core";
-import { DEFAULT_CASH_BPS, MIN_HOLDINGS, TOTAL_BPS } from "@takeandstake/shared";
+import { DEFAULT_CASH_BPS, displaySymbol, MIN_HOLDINGS, TOTAL_BPS } from "@takeandstake/shared";
 
 const RINGS = new Set<HoldingRole>(["direct", "indirect", "shared_interest", "hedge"]);
 
@@ -83,7 +83,7 @@ function pmWeights(meta: unknown): Map<string, number> {
     const sym = h.symbol?.toUpperCase();
     if (!sym || h.weightPct == null) continue;
     map.set(sym, h.weightPct);
-    map.set(sym.replace(/^RH/, ""), h.weightPct);
+    map.set(displaySymbol(sym), h.weightPct);
   }
   return map;
 }
@@ -157,7 +157,7 @@ export function portfolioFromRun(run: RunForPortfolio) {
         confidence: num(c.score!.confidence),
         halt: c.token!.isTradingHalt,
         role,
-        proposedWeightPct: weights.get(key) ?? weights.get(key.replace(/^RH/, ""))
+        proposedWeightPct: weights.get(key) ?? weights.get(displaySymbol(key))
       };
     })
   );

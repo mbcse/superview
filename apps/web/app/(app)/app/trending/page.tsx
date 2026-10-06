@@ -3,13 +3,14 @@ import { LeaderboardRow } from "@/components/social/leaderboard-row";
 import { TakeCard, type FeedTake } from "@/components/social/take-card";
 import { SegmentedTabsClient } from "./periods";
 
-export default async function TrendingPage({ searchParams }: { searchParams: Promise<{ period?: string; q?: string }> }) {
-  const { period: raw, q } = await searchParams;
+export default async function TrendingPage({ searchParams }: { searchParams: Promise<{ period?: string; q?: string; world?: string }> }) {
+  const { period: raw, q, world: worldRaw } = await searchParams;
+  const world = worldRaw === "MEMES" ? "MEMES" : "STOCKS";
   const period = raw === "1D" || raw === "1W" || raw === "All" ? raw : "1M";
   let takes: FeedTake[] = [];
   try {
     const qParam = q?.trim() ? `&q=${encodeURIComponent(q.trim())}` : "";
-    const board = await api<{ takes: FeedTake[] }>(`/v1/leaderboard?period=${period}${qParam}`);
+    const board = await api<{ takes: FeedTake[] }>(`/v1/leaderboard?period=${period}&world=${world}${qParam}`);
     takes = board.takes ?? [];
   } catch {
     takes = [];
@@ -17,7 +18,7 @@ export default async function TrendingPage({ searchParams }: { searchParams: Pro
   const query = (q ?? "").trim().toLowerCase();
   if (query) {
     takes = takes.filter((t) =>
-      `${t.sentence ?? ""} ${t.author} ${t.holdings.map((h) => h.symbol).join(" ")}`.toLowerCase().includes(query)
+      `${t.sentence ?? ""} ${t.astrologyChart ?? ""} ${t.author} ${t.holdings.map((h) => h.symbol).join(" ")}`.toLowerCase().includes(query)
     );
   }
   return (

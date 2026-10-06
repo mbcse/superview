@@ -18,7 +18,18 @@ export function fmtNum(n: number | null | undefined, digits = 2) {
 
 export function fmtPx(n: number | null | undefined) {
   if (n == null || Number.isNaN(n)) return "—";
+  if (n > 0 && n < 0.01) {
+    const s = n.toFixed(12).replace(/0+$/, "");
+    const frac = s.split(".")[1] ?? "";
+    const zeros = frac.match(/^0+/)?.[0].length ?? 0;
+    const rest = frac.slice(zeros, zeros + 3) || "1";
+    if (zeros >= 2) return `$0.0${subscript(zeros)}${rest}`;
+  }
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function subscript(n: number) {
+  return String(n).replace(/[0-9]/g, (d) => "₀₁₂₃₄₅₆₇₈₉"[Number(d)] ?? d);
 }
 
 export function fmtUsd(n: number | null | undefined) {
@@ -59,6 +70,16 @@ export function skipReason(code?: string) {
       return "Quote didn’t match the market price";
     case "dust":
       return "Below minimum trade size";
+    case "pool_share":
+      return "Too large for this pool";
+    case "top_up_sol":
+      return "Top up SOL for fees";
+    case "no_route":
+      return "No route";
+    case "impact":
+      return "Price impact too high";
+    case "risk":
+      return "Failed a risk check";
     default:
       return code ? code.replace(/_/g, " ") : "Skipped";
   }
@@ -79,8 +100,12 @@ export function orderStatusLabel(status?: string) {
   }
 }
 
-export function tick(sym: string) {
-  return (sym || "").replace(/^RH/, "");
+export function tick(sym: string, source?: string) {
+  const u = (sym || "").toUpperCase();
+  if (source && source !== "ROBINHOOD") return u;
+  if (source === "ROBINHOOD" && u.startsWith("RH") && u.length > 2) return u.slice(2);
+  if (!source && u.startsWith("RH") && u.length <= 6) return u.slice(2);
+  return u;
 }
 
 export function fmtAgo(iso?: string | Date | null) {

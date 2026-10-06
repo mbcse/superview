@@ -1,5 +1,6 @@
 import { Prisma, prisma } from "@takeandstake/db";
 import { RH_PRICES_URL } from "@takeandstake/chain";
+import { MEME_STALE_MS } from "@takeandstake/shared";
 import { asNum } from "../portfolio/mark.js";
 
 type RhQuote = {
@@ -17,6 +18,7 @@ type RhQuote = {
 
 export type LiveQuote = {
   tokenId: string;
+  id?: string;
   symbol: string;
   last: number | null;
   bid: number | null;
@@ -25,7 +27,7 @@ export type LiveQuote = {
   chgPct: number | null;
   volumeUsd: number | null;
   halt: boolean;
-  source: "RH_REST" | "CHAINLINK" | null;
+  source: "RH_REST" | "CHAINLINK" | "JUPITER" | "XSTOCKS" | "DEXSCREENER" | "BAGS" | "PUMPFUN" | null;
   asOf: string | null;
   stale: boolean;
   feed: boolean;
@@ -33,8 +35,10 @@ export type LiveQuote = {
 };
 
 const STALE_MS = 10 * 60 * 1000;
+const SOLANA_PRICE_SOURCES = ["JUPITER", "XSTOCKS", "DEXSCREENER", "BAGS", "PUMPFUN"] as const;
 
 export const QUOTES_CACHE_KEY = "quotes:last";
+export const QUOTES_ASSET_KEY = "quotes:asset";
 
 export type RhLiveQuote = {
   tokenId: string;
@@ -53,22 +57,23 @@ export function midOf(bid: number | null, ask: number | null): number | null {
   return ask ?? bid;
 }
 
-export function quoteKeys(symbol: string) {
+export function quoteKeys(symbol: string, source?: string) {
   const u = symbol.toUpperCase();
-  const bare = u.replace(/^RH/, "");
-  return [u, bare, bare ? `RH${bare}` : ""].filter(Boolean);
+  if (source && source !== "ROBINHOOD") return [u];
+  const bare = u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
+  return [u, bare, `RH${bare}`].filter(Boolean);
 }
 
-export function lookupPx(book: Map<string, number> | undefined, symbol: string) {
+export function lookupPx(book: Map<string, number> | undefined, symbol: string, source?: string) {
   if (!book?.size) return undefined;
-  for (const k of quoteKeys(symbol)) {
+  for (const k of quoteKeys(symbol, source)) {
     const v = book.get(k);
     if (v != null && Number.isFinite(v)) return v;
   }
 }
 
-export function setPriceAliases(book: Map<string, number>, symbol: string, px: number) {
-  for (const k of quoteKeys(symbol)) book.set(k, px);
+export function setPriceAliases(book: Map<string, number>, symbol: string, px: number, source?: string) {
+  for (const k of quoteKeys(symbol, source)) book.set(k, px);
 }
 
 export function dayChangePct(last: number | null | undefined, prior: number | null | undefined) {
@@ -173,11 +178,14 @@ export function quoteHasSymbol<T extends { symbol: string }>(quotes: T[], symbol
   return quoteKeys(symbol).some((k) => have.has(k));
 }
 
-export function filterQuotes<T extends { symbol: string }>(quotes: T[], symbols?: string[]) {
+export function filterQuotes<T extends { symbol: string; tokenId?: string }>(quotes: T[], symbols?: string[]) {
   if (!symbols?.length) return quotes;
   const want = new Set<string>();
-  for (const s of symbols) for (const k of quoteKeys(s)) want.add(k);
-  return quotes.filter((q) => want.has(q.symbol.toUpperCase()));
+  for (const s of symbols) {
+    want.add(s.toUpperCase());
+    for (const k of quoteKeys(s)) want.add(k);
+  }
+  return quotes.filter((q) => want.has(q.symbol.toUpperCase()) || want.has(String(q.tokenId ?? "").toUpperCase()));
 }
 
 export async function fetchRobinhoodQuotes(prior?: Map<string, number>) {
@@ -300,7 +308,7 @@ export async function latestPrice(tokenId: string) {
   });
   if (rh) return rh;
   return prisma.priceSnapshot.findFirst({
-    where: { tokenId: { in: ids }, source: "CHAINLINK" },
+    where: { tokenId: { in: ids }, source: { in: ["CHAINLINK", ...SOLANA_PRICE_SOURCES] } },
     orderBy: { observedAt: "desc" }
   });
 }
@@ -314,7 +322,7 @@ export async function latestPrices(tokenId: string, take = 2) {
   });
   if (rh.length) return rh;
   return prisma.priceSnapshot.findMany({
-    where: { tokenId: { in: ids }, source: "CHAINLINK" },
+    where: { tokenId: { in: ids }, source: { in: ["CHAINLINK", ...SOLANA_PRICE_SOURCES] } },
     orderBy: { observedAt: "desc" },
     take
   });
@@ -427,6 +435,42 @@ export async function prevCloseByTokens(tokens: Array<{ id: string; symbol: stri
       }
     }
   }
+  const solMissing = tokens.filter((t) => t.chainId === 101 && !out.has(t.id));
+  if (solMissing.length) {
+    const solIds = solMissing.map((t) => t.id);
+    const solSnaps = await prisma.priceSnapshot.findMany({
+      where: {
+        tokenId: { in: solIds },
+        source: { in: [...SOLANA_PRICE_SOURCES] },
+        observedAt: { lt: start }
+      },
+      orderBy: { observedAt: "desc" },
+      take: solIds.length * 8
+    });
+    for (const s of solSnaps) {
+      if (out.has(s.tokenId)) continue;
+      const n = Number(s.price);
+      if (Number.isFinite(n) && n > 0) out.set(s.tokenId, n);
+    }
+    const still = solMissing.filter((t) => !out.has(t.id)).map((t) => t.id);
+    if (still.length) {
+      const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const fallback = await prisma.priceSnapshot.findMany({
+        where: {
+          tokenId: { in: still },
+          source: { in: [...SOLANA_PRICE_SOURCES] },
+          observedAt: { lte: dayAgo }
+        },
+        orderBy: { observedAt: "desc" },
+        take: still.length * 8
+      });
+      for (const s of fallback) {
+        if (out.has(s.tokenId)) continue;
+        const n = Number(s.price);
+        if (Number.isFinite(n) && n > 0) out.set(s.tokenId, n);
+      }
+    }
+  }
   return out;
 }
 
@@ -437,6 +481,8 @@ export async function liveQuoteForToken(
     feedAddress: string | null;
     logoUrl?: string | null;
     isTradingHalt?: boolean;
+    world?: string | null;
+    chainId?: number;
   },
   priorClose?: number | null
 ): Promise<LiveQuote> {
@@ -445,7 +491,8 @@ export async function liveQuoteForToken(
   const prior =
     priorClose ?? (await prevCloseByTokens([token]).then((m) => m.get(token.id) ?? null)) ?? null;
   const asOf = snaps[0]?.observedAt?.toISOString() ?? null;
-  const stale = !asOf || Date.now() - new Date(asOf).getTime() > STALE_MS;
+  const staleMs = token.world === "MEMES" ? MEME_STALE_MS : STALE_MS;
+  const stale = !asOf || Date.now() - new Date(asOf).getTime() > staleMs;
   const chg = dayChangePct(last, prior);
   return {
     tokenId: token.id,
@@ -457,7 +504,7 @@ export async function liveQuoteForToken(
     chgPct: chg,
     volumeUsd: asNum(snaps[0]?.volumeUsd),
     halt: snaps[0]?.halt ?? token.isTradingHalt ?? false,
-    source: snaps[0]?.source === "RH_REST" || snaps[0]?.source === "CHAINLINK" ? snaps[0].source : null,
+    source: snaps[0]?.source ?? null,
     asOf,
     stale: last == null ? true : stale,
     feed: Boolean(token.feedAddress),

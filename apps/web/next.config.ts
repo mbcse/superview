@@ -25,6 +25,13 @@ const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? process.env.PRIVY_APP
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@takeandstake/shared", "remotion", "@remotion/player"],
+  webpack: (config) => {
+    config.resolve.extensionAlias = {
+      ...config.resolve.extensionAlias,
+      ".js": [".ts", ".tsx", ".js"]
+    };
+    return config;
+  },
   env: {
     NEXT_PUBLIC_API_ORIGIN:
       process.env.NEXT_PUBLIC_API_ORIGIN ?? process.env.API_ORIGIN ?? "http://localhost:4000",

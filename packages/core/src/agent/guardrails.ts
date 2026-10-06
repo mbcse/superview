@@ -1,4 +1,4 @@
-import { MIN_THESIS_ACTION_BPS, TOTAL_BPS } from "@takeandstake/shared";
+import { MEME_MAX_HOLDINGS, MEME_MAX_WEIGHT, MIN_THESIS_ACTION_BPS, TOTAL_BPS } from "@takeandstake/shared";
 
 export type ManagerAction = "keep" | "increase" | "decrease" | "add" | "remove";
 
@@ -38,7 +38,13 @@ export function applyGuardrails(
   proposal: ManagerProposal,
   current: Array<{ tokenId: string; weightBps: number }>,
   mandate: Mandate,
-  opts: { pricesStale?: boolean; oraclePaused?: boolean; namesAddedThisWeek?: number; riskReductionOnly?: boolean }
+  opts: {
+    pricesStale?: boolean;
+    oraclePaused?: boolean;
+    namesAddedThisWeek?: number;
+    riskReductionOnly?: boolean;
+    world?: "STOCKS" | "MEMES";
+  }
 ): GuardrailResult {
   const violations: string[] = [];
   const trimmed: string[] = [];
@@ -99,10 +105,32 @@ export function applyGuardrails(
     trimmed.push("turnover_scaled");
   }
 
+  const cap = opts.world === "MEMES" ? Math.round(MEME_MAX_WEIGHT * TOTAL_BPS) : null;
+  if (cap) {
+    for (const [id, w] of next) {
+      if (w > cap) {
+        next.set(id, cap);
+        trimmed.push(`meme_name_cap:${id}`);
+      }
+    }
+    if (next.size > MEME_MAX_HOLDINGS) {
+      const keep = [...next.entries()].sort((a, b) => b[1] - a[1]).slice(0, MEME_MAX_HOLDINGS);
+      next.clear();
+      for (const [id, w] of keep) next.set(id, w);
+      trimmed.push("meme_count_cap");
+    }
+  }
+
   const weights = [...next.entries()].map(([tokenId, weightBps]) => ({ tokenId, weightBps }));
   const sum = weights.reduce((s, w) => s + w.weightBps, 0) + cashBps;
-  if (sum !== TOTAL_BPS && weights[0]) {
-    weights[0].weightBps += TOTAL_BPS - sum;
+  if (sum !== TOTAL_BPS) {
+    const delta = TOTAL_BPS - sum;
+    const first = weights[0];
+    if (first && !(cap && first.weightBps + delta > cap)) {
+      first.weightBps += delta;
+    } else {
+      cashBps += delta;
+    }
   }
 
   return {

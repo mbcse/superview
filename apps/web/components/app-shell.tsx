@@ -13,13 +13,15 @@ import { API_ORIGIN } from "@/lib/fmt";
 import { fmtVsLabel, useLiveVsSpy } from "@/lib/live-vs";
 import { LivePrice } from "./social/live-price";
 import { TickValue } from "@/components/data/tick-value";
+import { SegmentedTabs } from "@/components/data/segmented-tabs";
 import type { FeedTake } from "./social/take-card";
 import { useLiveQuote } from "./social/price-stream";
 import { useStockSheet } from "./social/stock-sheet";
 import { useQueryState } from "nuqs";
+import { useWorld } from "@/lib/world";
 
 const EASE = [0.23, 1, 0.32, 1] as const;
-const MOVERS = ["NVDA", "AAPL", "TSLA", "MSFT", "AMZN", "META"] as const;
+const STOCK_MOVERS = ["NVDA", "AAPL", "TSLA", "MSFT", "AMZN", "META"] as const;
 
 function initialsOf(name?: string | null) {
   const parts = (name ?? "You").trim().split(/\s+/);
@@ -48,6 +50,7 @@ function cashSessionOpen(d = new Date()) {
 }
 
 function MarketStatus() {
+  const { world } = useWorld();
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const tick = () => setOpen(cashSessionOpen());
@@ -55,13 +58,14 @@ function MarketStatus() {
     const id = window.setInterval(tick, 30_000);
     return () => window.clearInterval(id);
   }, []);
+  const live = world === "MEMES" || open;
   return (
     <p className="mt-10 flex items-center gap-2 px-4 text-[11px] uppercase tracking-[0.08em] text-muted">
       <span className="relative flex h-2 w-2">
-        {open ? <span className="absolute inset-0 animate-ping rounded-full bg-aqua/60" /> : null}
-        <span className={`relative h-2 w-2 rounded-full ${open ? "bg-aqua" : "bg-muted"}`} />
+        {live ? <span className="absolute inset-0 animate-ping rounded-full bg-aqua/60" /> : null}
+        <span className={`relative h-2 w-2 rounded-full ${live ? "bg-aqua" : "bg-muted"}`} />
       </span>
-      {open ? "Market open" : "After hours"}
+      {world === "MEMES" ? "24/7" : open ? "Market open" : "After hours"}
     </p>
   );
 }
@@ -187,8 +191,19 @@ function RailLink({
 }
 
 function NavRail({ className = "" }: { className?: string }) {
+  const { world, setWorld } = useWorld();
   return (
     <nav aria-label="App" className={className}>
+      <div className="mb-4">
+        <SegmentedTabs
+          grow
+          size="sm"
+          layoutId="rail-world"
+          options={["Stocks", "Memes"]}
+          value={world === "MEMES" ? "Memes" : "Stocks"}
+          onChange={(v) => setWorld(v === "Memes" ? "MEMES" : "STOCKS")}
+        />
+      </div>
       <div className="flex flex-col gap-1">
         <RailLink href="/app" label="Home" icon={House} exact />
         <RailLink href="/app/trending" label="Trending" icon={TrendUp} />
@@ -224,13 +239,28 @@ function PulseViewRow({ item, rank }: { item: FeedTake; rank: number }) {
 }
 
 function PulseRail({ className = "" }: { className?: string }) {
+  const { world } = useWorld();
   const [popular, setPopular] = useState<FeedTake[]>([]);
+  const [movers, setMovers] = useState<string[]>([...STOCK_MOVERS]);
   useEffect(() => {
-    fetch(`${API_ORIGIN}/v1/leaderboard?period=1M`)
+    if (world === "STOCKS") setMovers([...STOCK_MOVERS]);
+    fetch(`${API_ORIGIN}/v1/feed?tab=trending&world=${world}`)
       .then((r) => r.json())
-      .then((d) => setPopular((d.takes ?? []).slice(0, 3)))
-      .catch(() => {});
-  }, []);
+      .then((d) => {
+        const takes = (d.takes ?? []).slice(0, 3) as FeedTake[];
+        setPopular(takes);
+        if (world === "MEMES") {
+          const symbols = [
+            ...new Set(takes.flatMap((t) => (t.holdings ?? []).map((h) => h.symbol).filter(Boolean)))
+          ].slice(0, 6);
+          setMovers(symbols);
+        }
+      })
+      .catch(() => {
+        setPopular([]);
+        if (world === "MEMES") setMovers([]);
+      });
+  }, [world]);
 
   return (
     <aside aria-label="The pulse" className={className}>
@@ -252,9 +282,10 @@ function PulseRail({ className = "" }: { className?: string }) {
 
         <p className="text-[13px] font-medium text-ink">Moving today</p>
         <ul className="mt-2">
-          {MOVERS.map((sym) => (
+          {movers.map((sym) => (
             <MoverRow key={sym} symbol={sym} />
           ))}
+          {!movers.length ? <p className="mt-3 text-[13px] text-muted">Quotes appear as coins trade.</p> : null}
         </ul>
 
         <div className="my-5 h-px bg-teal/10" />

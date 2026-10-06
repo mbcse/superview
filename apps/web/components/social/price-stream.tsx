@@ -25,6 +25,16 @@ function startPriceStream() {
   let closed = false;
   let es: EventSource | null = null;
   let retry = 0;
+  let lastWanted = "";
+  let streamWorld = "";
+
+  function currentWorld() {
+    try {
+      return localStorage.getItem("superview:world:v1") === "MEMES" ? "MEMES" : "STOCKS";
+    } catch {
+      return "STOCKS";
+    }
+  }
 
   function apply(list: Array<LiveQuote & { last?: number | null }>) {
     enqueueQuotes(
@@ -38,7 +48,7 @@ function startPriceStream() {
     const symbols = wantedSymbols();
     if (!symbols.length) return;
     try {
-      const r = await fetch(`${API_ORIGIN}/v1/quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
+      const r = await fetch(`${API_ORIGIN}/v1/quotes?ids=${encodeURIComponent(symbols.join(","))}`);
       const d = (await r.json()) as { quotes?: Array<LiveQuote & { last: number | null }> };
       apply(d.quotes ?? []);
     } catch {
@@ -49,7 +59,11 @@ function startPriceStream() {
   function connect() {
     if (closed) return;
     es?.close();
-    es = new EventSource(`${API_ORIGIN}/v1/stream/prices`);
+    const wanted = wantedSymbols();
+    const world = currentWorld();
+    lastWanted = wanted.slice().sort().join(",");
+    streamWorld = world;
+    es = new EventSource(`${API_ORIGIN}/v1/stream/prices?world=${world}&ids=${encodeURIComponent(wanted.join(","))}`);
     es.onmessage = (ev) => {
       retry = 0;
       try {
@@ -72,10 +86,17 @@ function startPriceStream() {
   let wantedPull = 0;
   void pull();
   connect();
-  const poll = window.setInterval(() => void pull(), 500);
+  const poll = window.setInterval(() => {
+    void pull();
+    if (currentWorld() !== streamWorld) connect();
+  }, 500);
   const offWanted = onWanted(() => {
     window.clearTimeout(wantedPull);
-    wantedPull = window.setTimeout(() => void pull(), 80);
+    wantedPull = window.setTimeout(() => {
+      void pull();
+      const next = wantedSymbols().slice().sort().join(",");
+      if (next !== lastWanted || currentWorld() !== streamWorld) connect();
+    }, 80);
   });
   return () => {
     closed = true;
@@ -108,13 +129,21 @@ export function useQuoteBook() {
   return useSyncExternalStore(subscribeAll, getQuoteBook, getQuoteBook);
 }
 
-export function useLiveQuote(symbol?: string) {
+export function useLiveQuote(symbol?: string, tokenId?: string) {
   useEffect(() => {
     if (symbol) watchInStore(symbol);
-  }, [symbol]);
+    if (tokenId) watchInStore(tokenId);
+  }, [symbol, tokenId]);
   return useSyncExternalStore(
-    (fn) => (symbol ? subscribeSymbol(symbol, fn) : () => {}),
-    () => getQuote(symbol),
+    (fn) => {
+      const offSymbol = symbol ? subscribeSymbol(symbol, fn) : () => {};
+      const offId = tokenId ? subscribeSymbol(tokenId, fn) : () => {};
+      return () => {
+        offSymbol();
+        offId();
+      };
+    },
+    () => getQuote(symbol, tokenId),
     () => null
   );
 }

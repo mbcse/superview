@@ -1,6 +1,6 @@
 import { prisma } from "@takeandstake/db";
 import { cleanAbout } from "@takeandstake/core";
-import { logError } from "@takeandstake/shared";
+import { displaySymbol, logError } from "@takeandstake/shared";
 import { DILIGENCE_PROMPT, fill } from "./prompts/index.js";
 import { embedText } from "./embed.js";
 import { hasOpenAI } from "./llm.js";
@@ -128,7 +128,7 @@ export async function fillCompanyAbout(tokenId: string) {
   const cached = cleanAbout(company.businessSummary) ?? cleanAbout(company.profile);
   if (cached) return cached;
   if (!hasOpenAI()) return null;
-  const symbol = company.token.symbol.replace(/^RH/, "");
+  const symbol = displaySymbol(company.token.symbol, company.token.source);
   const raw = await webSearchText(
     `What does ${company.legalName} (ticker ${symbol}) do as a public company? Write 2-3 plain sentences about the business. No JSON, no bullets, no citations.`,
     3

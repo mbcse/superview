@@ -10,6 +10,7 @@ import { SegmentedTabs } from "@/components/data/segmented-tabs";
 import { fmtPx, fmtPct, tick, API_ORIGIN } from "@/lib/fmt";
 import { Button } from "@/components/ui/button";
 import { TickValue } from "@/components/data/tick-value";
+import { TokenMark, stockTick } from "@/components/data/token-mark";
 
 export type StockMeta = {
   takeId?: string;
@@ -17,6 +18,7 @@ export type StockMeta = {
   role?: string | null;
   weightBps?: number | null;
   whyInBasket?: string | null;
+  chainId?: number;
 };
 
 const PERIODS = ["1D", "1M", "1Y"] as const;
@@ -54,15 +56,18 @@ type TokenCard = {
   about?: string | null;
   filling?: boolean;
   actions?: Array<{ type?: string; status?: string; processDate?: string | null }>;
+  listings?: Array<{ id: string; symbol: string; chainId: number; source: string }>;
 };
 
 function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: StockMeta; onClose: () => void }) {
   const quote = useLiveQuote(symbol ?? undefined);
   const reduce = useReducedMotion();
-  const name = symbol ? tick(symbol) : "";
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("1M");
   const [spark, setSpark] = useState<number[]>([]);
   const [card, setCard] = useState<TokenCard | null>(null);
+  const chainId =
+    meta.chainId ?? card?.listings?.find((l) => l.symbol.toUpperCase() === String(symbol).toUpperCase())?.chainId;
+  const name = symbol ? stockTick(symbol, chainId) : "";
 
   useEffect(() => {
     if (!symbol) return;
@@ -111,14 +116,14 @@ function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: St
       setSpark([]);
       return;
     }
-    const want = symbol.replace(/^RH/, "").toUpperCase();
+    const want = tick(symbol);
     fetch(`${API_ORIGIN}/v1/takes/${meta.takeId}/series?range=${period}`)
       .then((r) => r.json())
       .then((j) => {
         const points = (j.points ?? []) as Array<{ holdingContributions?: Array<{ symbol?: string; last?: number | null }> }>;
         const values: number[] = [];
         for (const p of points) {
-          const hit = (p.holdingContributions ?? []).find((h) => (h.symbol ?? "").replace(/^RH/, "").toUpperCase() === want);
+          const hit = (p.holdingContributions ?? []).find((h) => tick(h.symbol ?? "") === want);
           if (hit?.last != null) values.push(hit.last);
         }
         setSpark(values);
@@ -158,7 +163,8 @@ function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: St
               <X size={16} />
             </button>
             <p className="text-[13px] font-medium text-muted">Live mark</p>
-            <h2 id="stock-title" className="display mt-2 flex items-center gap-2 text-[28px] text-ink">
+            <h2 id="stock-title" className="display mt-2 flex items-center gap-3 text-[28px] text-ink">
+              <TokenMark symbol={symbol} logoUrl={card?.logoUrl} chainId={chainId} size={40} />
               {name}
               {meta.role ? <RoleChip role={meta.role} /> : null}
             </h2>
@@ -167,6 +173,11 @@ function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: St
             ) : null}
             {card?.sector || card?.industry ? (
               <p className="mt-1 text-[13px] text-muted">{[card.sector, card.industry].filter(Boolean).join(" · ")}</p>
+            ) : null}
+            {card?.listings && card.listings.length > 1 ? (
+              <p className="mt-2 text-[12px] text-muted">
+                {card.listings.map((l) => `${l.symbol} · ${l.chainId === 101 ? "Solana" : "Robinhood"}`).join(" · ")}
+              </p>
             ) : null}
             {meta.weightBps != null ? (
               <p className="mt-1 font-mono text-[13px] text-muted">{(meta.weightBps / 100).toFixed(1)}% of the basket</p>

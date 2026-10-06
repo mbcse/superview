@@ -7,7 +7,7 @@ import {
   readAggregator
 } from "@takeandstake/chain";
 import { log, logError } from "@takeandstake/shared";
-import { ingestRobinhoodPrices, latestPrices, liveQuoteForToken, prevCloseByTokens, type LiveQuote } from "../market/prices.js";
+import { ingestRobinhoodPrices, latestPrices, liveQuoteForToken, lookupPx, prevCloseByTokens, type LiveQuote } from "../market/prices.js";
 import { backingPrivacy } from "../social/backing.js";
 import { asNum, asSharePrice, unitsToQty, weightedBookIndex, type HoldingContribution } from "./mark.js";
 import { buildTakeSeries, rangeSince } from "./series.js";
@@ -20,7 +20,6 @@ export const KNOWN_CHAINLINK_FEEDS: Record<string, `0x${string}`> = {
 };
 
 const USDG_DECIMALS = 6;
-const TOKEN_DECIMALS = 18;
 const STALE_MS = 48 * 60 * 60 * 1000;
 
 export async function attachKnownFeeds() {
@@ -96,21 +95,26 @@ export async function quoteForToken(token: {
 }
 
 export async function listQuotes(symbols?: string[]): Promise<QuoteRow[]> {
-  let where: { chainId: number; symbol?: { in: string[] } } = { chainId: 4663 };
-  if (symbols?.length) {
-    const expanded = new Set<string>();
-    for (const s of symbols) {
-      const u = s.toUpperCase();
-      const bare = u.replace(/^RH/, "");
-      expanded.add(u);
-      if (bare) {
-        expanded.add(bare);
-        expanded.add(`RH${bare}`);
-      }
-    }
-    where = { chainId: 4663, symbol: { in: [...expanded] } };
+  const ids = (symbols ?? []).filter((s) => s.length > 16);
+  const ticks = (symbols ?? []).filter((s) => s.length <= 16);
+  const expanded = new Set<string>();
+  for (const s of ticks) {
+    const u = s.toUpperCase();
+    expanded.add(u);
+    if (u.startsWith("RH") && u.length > 2) expanded.add(u.slice(2));
+    else expanded.add(`RH${u}`);
   }
-  const tokens = await prisma.stockToken.findMany({ where });
+  const symbolMatch = [...expanded].map((s) => ({ symbol: { equals: s, mode: "insensitive" as const } }));
+  const tokens = await prisma.stockToken.findMany({
+    where: symbols?.length
+      ? {
+          OR: [
+            ...(ids.length ? [{ id: { in: ids } }] : []),
+            ...symbolMatch
+          ]
+        }
+      : { chainId: 4663 }
+  });
   const closes = await prevCloseByTokens(tokens);
   return Promise.all(tokens.map((t) => liveQuoteForToken(t, closes.get(t.id) ?? null)));
 }
@@ -129,22 +133,24 @@ export async function markPublishedTakes(liveLast?: Map<string, number>, liveTok
   const spy = await prisma.stockToken.findFirst({
     where: { chainId: 4663, symbol: { in: ["RHSPY", "SPY"] } }
   });
-  const lookup = (book: Map<string, number> | undefined, symbol: string) => {
+  const lookup = (book: Map<string, number> | undefined, symbol: string, source?: string) => {
     if (!book?.size) return null;
-    const u = symbol.toUpperCase();
-    const bare = u.replace(/^RH/, "");
-    return book.get(u) ?? book.get(bare) ?? book.get(`RH${bare}`) ?? null;
+    return lookupPx(book, symbol, source) ?? null;
   };
-  const lastOf = (symbol: string, fallback: number | null) => lookup(liveLast, symbol) ?? fallback;
-  const tokenOf = (symbol: string) => lookup(liveToken, symbol);
-  const shareLeg = (symbol: string, last: number | null, publish: number | null, prior: number | null) => {
-    const share = lastOf(symbol, last);
-    return { last: share, prior, publish: asSharePrice(publish, share, tokenOf(symbol)) };
+  const lastOf = (symbol: string, fallback: number | null, source?: string) => lookup(liveLast, symbol, source) ?? fallback;
+  const tokenOf = (symbol: string, source?: string) => lookup(liveToken, symbol, source);
+  const shareLeg = (symbol: string, last: number | null, publish: number | null, prior: number | null, source?: string) => {
+    const share = lastOf(symbol, last, source);
+    return { last: share, prior, publish: asSharePrice(publish, share, tokenOf(symbol, source)) };
   };
   let n = 0;
   for (const take of takes) {
     const holdings = take.revisions[0]?.target?.holdings ?? [];
     if (!holdings.length) continue;
+    const noExitBps = holdings
+      .filter((h) => Boolean((h.token.riskFlags as { noExit?: boolean } | null)?.noExit))
+      .reduce((s, h) => s + h.weightBps, 0);
+    if (noExitBps > 1_000) continue;
     const legs = [];
     for (const h of holdings) {
       const snaps = await latestMarks(h.tokenId, 2);
@@ -152,7 +158,8 @@ export async function markPublishedTakes(liveLast?: Map<string, number>, liveTok
         h.token.symbol,
         asNum(snaps[0]?.price),
         await priceAtOrAfter(h.tokenId, take.createdAt),
-        asNum(snaps[1]?.price)
+        asNum(snaps[1]?.price),
+        h.token.source
       );
       legs.push({
         tokenId: h.tokenId,
@@ -231,11 +238,14 @@ export async function computePocketMark(pocketId: string): Promise<PocketMark | 
   let cost = 0;
   for (const acc of pocket.accounts.filter((a) => a.kind === "POSITION" && a.tokenId)) {
     const token = await prisma.stockToken.findUnique({ where: { id: acc.tokenId! } });
-    const qty = acc.entries.reduce((s, e) => s + unitsToQty(e.amount, TOKEN_DECIMALS), 0);
+    const decimals = token?.decimals ?? 18;
+    const qty = acc.entries.reduce((s, e) => s + unitsToQty(e.amount, decimals), 0);
     const costUsd = acc.entries.reduce((s, e) => s + Number(e.usdValue), 0);
     const snaps = token ? await latestMarks(token.id, 1) : [];
     const last = asNum(snaps[0]?.price);
-    const mtm = last == null ? null : qty * last;
+    const mult = token ? Number(token.currentMultiplier ?? 0) : 0;
+    const shareMult = mult > 1e12 ? mult / 1e18 : mult > 0 ? mult : 1;
+    const mtm = last == null ? null : qty * last * shareMult;
     if (mtm != null) positionsUsd += mtm;
     cost += costUsd;
     legs.push({
@@ -355,9 +365,14 @@ export function serializeFeedTake(t: {
   id: string;
   createdAt: Date;
   seeded?: boolean;
+  world?: string;
+  chainId?: number;
+  lens?: string;
+  astrologySystem?: string | null;
   author: { handle: string };
   revisions: Array<{
     sentence: string;
+    astrologyChart?: string | null;
     target: { holdings: Array<{ tokenId: string; weightBps: number; rationale: string; token: { symbol: string; feedAddress: string | null; logoUrl?: string | null } }> } | null;
   }>;
   valuations: Array<{
@@ -393,6 +408,11 @@ export function serializeFeedTake(t: {
   return {
     id: t.id,
     seeded: Boolean(t.seeded),
+    world: t.world ?? "STOCKS",
+    chainId: t.chainId ?? 4663,
+    lens: t.lens === "SKY" ? "SKY" : "BELIEF",
+    astrologySystem: t.astrologySystem === "VEDIC" || t.astrologySystem === "WESTERN" ? t.astrologySystem : null,
+    astrologyChart: t.lens === "SKY" ? rev?.astrologyChart ?? null : null,
     sentence: rev?.sentence,
     author: t.author.handle,
     createdAt: t.createdAt instanceof Date ? t.createdAt.toISOString() : String(t.createdAt),

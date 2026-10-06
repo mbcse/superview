@@ -1,5 +1,10 @@
 {
   "version": "2.0.0",
+  "options": {
+    "env": {
+      "PATH": "${env:HOME}/.nvm/versions/node/v23.3.0/bin:${env:HOME}/Library/pnpm:/Applications/Docker.app/Contents/Resources/bin:/opt/homebrew/bin:/usr/local/bin:${env:PATH}"
+    }
+  },
   "tasks": [
     {
       "label": "dev all",
@@ -37,10 +42,9 @@
     {
       "label": "infra",
       "type": "shell",
-      "command": "docker compose up -d postgres redis",
+      "command": "export PATH=\"/Applications/Docker.app/Contents/Resources/bin:/usr/local/bin:/opt/homebrew/bin:$PATH\"; if ! docker info >/dev/null 2>&1; then open -a Docker; i=0; while [ $i -lt 60 ]; do docker info >/dev/null 2>&1 && break; i=$((i+1)); sleep 1; done; fi; docker compose up -d postgres redis",
       "options": {
-        "cwd": "${workspaceFolder}",
-        "env": {}
+        "cwd": "${workspaceFolder}"
       },
       "presentation": {
         "reveal": "silent",

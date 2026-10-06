@@ -1,7 +1,9 @@
 export const PROMPT_VERSION = "2026-09-30.1";
 
-export { INTERPRETER_PROMPT, VERSION as INTERPRETER_VERSION } from "./interpreter.js";
-export { SCREENER_PROMPT, VERSION as SCREENER_VERSION } from "./screener.js";
+export { INTERPRETER_PROMPT, MEME_INTERPRETER_PROMPT, VERSION as INTERPRETER_VERSION } from "./interpreter.js";
+export { ASTROLOGY_INTERPRETER_PROMPT, VERSION as ASTROLOGY_INTERPRETER_VERSION } from "./astrology-interpreter.js";
+export { astrologyCanon, astrologyCanonExcerpt, type AstrologySystem } from "./astrology.js";
+export { SCREENER_PROMPT, MEME_SCREENER_PROMPT, VERSION as SCREENER_VERSION } from "./screener.js";
 export { DILIGENCE_PROMPT, WEB_DILIGENCE_PROMPT, WEB_NEWS_PROMPT, VERSION as DILIGENCE_VERSION } from "./diligence.js";
 export { discoveryObjective, WEB_DISCOVER_PROMPT, VERSION as DISCOVERY_VERSION } from "./discovery.js";
 export { ANALYST_PROMPT, VERSION as ANALYST_VERSION } from "./analyst.js";

@@ -2,10 +2,22 @@ import { prisma } from "@takeandstake/db";
 import { constructPortfolio, type HoldingRole } from "@takeandstake/core";
 import { criticModel, researchModel } from "./llm.js";
 import { genObject } from "./generate.js";
-import { log } from "@takeandstake/shared";
+import {
+  displaySymbol,
+  log,
+  parseChainId,
+  parseWorld,
+  sanitizeCatalogText,
+  MEME_MIN_LIQUIDITY_USD,
+  MEME_MIN_AGE_MS,
+  MEME_MAX_TOP_HOLDERS,
+  MEME_MAX_DEV_BALANCE,
+  MEME_MIN_HOLDINGS,
+  type World
+} from "@takeandstake/shared";
 import { cosine, embedText } from "./embed.js";
 import { matchNameToUniverse } from "./universe-match.js";
-import { screenCatalog } from "./screen.js";
+import { screenCatalog, orderByThesis } from "./screen.js";
 import { factsFromCompany, saveResearchNotes, thesisKey, thesisNoteFromCompany } from "./company-cache.js";
 import { clearCheckpoint, mergePicks, parseCheckpoint, patchCheckpoint } from "./checkpoint.js";
 import { runWebDiligence, runWebDiscover } from "./web-research.js";
@@ -14,8 +26,12 @@ import {
   ANALYST_PROMPT,
   CRITIC_PROMPT,
   INTERPRETER_PROMPT,
+  MEME_INTERPRETER_PROMPT,
+  ASTROLOGY_INTERPRETER_PROMPT,
+  MEME_SCREENER_PROMPT,
   PORTFOLIO_MANAGER_PROMPT,
   PROMPT_VERSION,
+  astrologyCanon,
   discoveryObjective,
   fill
 } from "./prompts/index.js";
@@ -29,6 +45,69 @@ import {
 
 export type ResearchEmitter = (stage: string, message: string, payload?: unknown) => Promise<void>;
 
+const RINGS = new Set(["direct", "indirect", "shared_interest", "hedge"]);
+
+function placeholderAnalystItem(p: { symbol: string; reason?: string; ring?: string }): AnalystItem {
+  const role = p.ring && RINGS.has(p.ring) ? (p.ring as AnalystItem["role"]) : "indirect";
+  const why = (p.reason ?? "").trim() || `${p.symbol} fits the view.`;
+  return {
+    symbol: p.symbol,
+    exposurePurity: 0.5,
+    directness: 0.5,
+    quality: 0.5,
+    valuationRoom: 0.5,
+    riskPenalty: 0.4,
+    confidence: 0.35,
+    role,
+    whyInBasket: why,
+    bullPoints: [why].slice(0, 3),
+    bearPoints: ["Evidence was thin on this pass."],
+    whatWouldMakeUsSell: "The thesis no longer holds.",
+    sourceIds: []
+  };
+}
+
+async function scoreAnalystSlice(
+  slice: Array<{ symbol: string; reason: string; ring: string }>,
+  promptHead: string,
+  bySymbol: Map<string, { legalName?: string; sector?: string | null; businessSummary?: string }>,
+  diligence: Map<string, string>
+): Promise<{ items: AnalystItem[] }> {
+  if (!slice.length) return { items: [] };
+  try {
+    return await genObject({
+      model: researchModel(),
+      schema: analystBatchSchema,
+      label: "analyst",
+      prompt:
+        promptHead +
+        `\nCandidates:\n` +
+        slice
+          .map((p) => {
+            const u = bySymbol.get(p.symbol.toUpperCase());
+            return JSON.stringify({
+              symbol: p.symbol,
+              name: u?.legalName,
+              sector: u?.sector,
+              reason: p.reason,
+              ring: p.ring,
+              diligence: diligence.get(p.symbol) ?? diligence.get(p.symbol.toUpperCase()) ?? u?.businessSummary
+            });
+          })
+          .join("\n")
+    });
+  } catch {
+    if (slice.length <= 1) {
+      log("ai", "analyst fallback", { symbol: slice[0]?.symbol });
+      return { items: slice.map(placeholderAnalystItem) };
+    }
+    const mid = Math.ceil(slice.length / 2);
+    const left = await scoreAnalystSlice(slice.slice(0, mid), promptHead, bySymbol, diligence);
+    const right = await scoreAnalystSlice(slice.slice(mid), promptHead, bySymbol, diligence);
+    return { items: [...left.items, ...right.items] };
+  }
+}
+
 export async function runResearchPipeline(runId: string, emit: ResearchEmitter = async () => {}) {
   const run = await prisma.researchRun.findUnique({
     where: { id: runId },
@@ -36,29 +115,64 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
   });
   if (!run) throw new Error("run_not_found");
 
+  const rev = run.take?.revisions?.[0];
+  const lens = run.take?.lens === "SKY" ? "SKY" : "BELIEF";
+  const astrologySystem = run.take?.astrologySystem === "VEDIC" ? "VEDIC" : "WESTERN";
+  const chart = (rev?.astrologyChart ?? "").trim();
+  const versions = (run.modelVersions as {
+    view?: string;
+    skyHeadlineProvided?: boolean;
+  } | null) ?? {};
   const view =
-    (run.take?.revisions?.[0]?.sentence as string | undefined) ??
-    String((run.modelVersions as { view?: string } | null)?.view ?? "");
+    lens === "SKY"
+      ? chart || (rev?.sentence as string | undefined) || String(versions.view ?? "")
+      : ((rev?.sentence as string | undefined) ?? String(versions.view ?? ""));
   if (!view.trim()) throw new Error("missing_view");
 
-  const companies = await prisma.universeCompany.findMany({
-    include: { token: true },
-    where: { token: { status: "ACTIVE", chainId: 4663 } }
+  const world: World = parseWorld(run.world ?? run.take?.world);
+  const chainId = parseChainId(run.chainId ?? run.take?.chainId, world);
+  const launchBet = /launch|just launched|new coin|bonding/i.test(view);
+  const listed = await prisma.stockToken.findMany({
+    where: { status: "ACTIVE", world, chainId },
+    include: { universe: true }
   });
-  const universe = companies.map((c) => ({
-    id: c.id,
-    tokenId: c.tokenId,
-    symbol: c.token.symbol,
-    legalName: c.legalName,
-    businessSummary: c.businessSummary,
-    sector: c.sector,
-    halt: c.token.isTradingHalt,
-    embedding: Array.isArray(c.embedding) ? (c.embedding as number[]) : [],
-    tags: c.tags,
-    profile: c.profile,
-    refreshedAt: c.refreshedAt
+  const flagged = listed.filter((t) => {
+    if (world !== "MEMES") return true;
+    const flags = (t.riskFlags ?? {}) as {
+      mintAuthorityDisabled?: boolean;
+      freezeAuthorityDisabled?: boolean;
+      topHolders?: number | null;
+      devBalance?: number | null;
+      isSus?: boolean;
+    };
+    if (!launchBet && t.launchedAt && Date.now() - t.launchedAt.getTime() < MEME_MIN_AGE_MS) return false;
+    if (flags.mintAuthorityDisabled === false) return false;
+    if (flags.freezeAuthorityDisabled === false) return false;
+    if ((flags.topHolders ?? 0) > MEME_MAX_TOP_HOLDERS) return false;
+    if ((flags.devBalance ?? 0) > MEME_MAX_DEV_BALANCE) return false;
+    if (flags.isSus) return false;
+    return true;
+  });
+  const tokens = (() => {
+    if (world !== "MEMES") return flagged;
+    const ranked = [...flagged].sort((a, b) => Number(b.liquidityUsd ?? 0) - Number(a.liquidityUsd ?? 0));
+    const liquid = ranked.filter((t) => Number(t.liquidityUsd ?? 0) >= MEME_MIN_LIQUIDITY_USD);
+    return liquid.length >= 16 ? liquid : ranked.slice(0, 40);
+  })();
+  const universe = tokens.map((t) => ({
+    id: t.universe?.id ?? t.id,
+    tokenId: t.id,
+    symbol: t.symbol,
+    legalName: sanitizeCatalogText(t.universe?.legalName ?? t.name, 80),
+    businessSummary: `CATALOG_DATA: "${sanitizeCatalogText(t.universe?.businessSummary ?? t.name, 280)}"`,
+    sector: t.universe?.sector ?? (world === "MEMES" ? "meme" : null),
+    halt: t.isTradingHalt,
+    embedding: Array.isArray(t.universe?.embedding) ? (t.universe!.embedding as number[]) : [],
+    tags: t.universe?.tags ?? t.riskFlags,
+    profile: t.universe?.profile,
+    refreshedAt: t.universe?.refreshedAt ?? t.updatedAt
   }));
-  log("ai", "research start", { run: runId, view, universe: universe.length });
+  log("ai", "research start", { run: runId, view, world, chainId, universe: universe.length });
   const cp0 = parseCheckpoint(run.modelVersions);
   if (cp0.spec || (cp0.screenedSymbols?.length ?? 0) > 0) {
     log("ai", "research resume", {
@@ -73,22 +187,39 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
   let spec = interpreterSchema.safeParse(cp0.spec).success ? cp0.spec! : undefined;
   if (spec) {
     await emit("interpret", "Reusing thesis from the last attempt");
-  } else if (shouldRefuseView(view)) {
+  } else if (lens !== "SKY" && shouldRefuseView(view)) {
     spec = refusedSpec(view);
     await emit("interpret", "This is not a readable view");
   } else {
-    await emit("interpret", "Reading your view");
+    await emit("interpret", lens === "SKY" ? "Reading the sky" : "Reading your view");
     spec = await genObject({
       model: researchModel(),
       schema: interpreterSchema,
       label: "interpret",
-      prompt: fill(INTERPRETER_PROMPT, {
-        view,
-        date: new Date().toISOString().slice(0, 10),
-        marketContext: ""
-      })
+      prompt:
+        lens === "SKY"
+          ? fill(ASTROLOGY_INTERPRETER_PROMPT, {
+              view,
+              headline: versions.skyHeadlineProvided ? String(rev?.sentence ?? "") : "",
+              date: new Date().toISOString().slice(0, 10),
+              system: astrologySystem,
+              canon: astrologyCanon(astrologySystem),
+              marketContext:
+                world === "MEMES" ? "Launchpad memecoins. Culture and community, not earnings." : ""
+            })
+          : fill(world === "MEMES" ? MEME_INTERPRETER_PROMPT : INTERPRETER_PROMPT, {
+              view,
+              date: new Date().toISOString().slice(0, 10),
+              marketContext: world === "MEMES" ? "Launchpad memecoins. Culture and community, not earnings." : ""
+            })
     });
     await patchCheckpoint(runId, { spec });
+    if (lens === "SKY" && spec.normalizedView && !versions.skyHeadlineProvided && rev?.id) {
+      await prisma.takeRevision.update({
+        where: { id: rev.id },
+        data: { sentence: spec.normalizedView.slice(0, 280) }
+      });
+    }
   }
 
   await prisma.thesisSpec.upsert({
@@ -136,14 +267,16 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
       });
     }
   }
-  await emit("interpret", "Thesis ready", { spec });
+  await emit("interpret", "Thesis ready", { spec, suggestWorld: spec.suggestWorld });
 
   await setStage(runId, "SCREENING", "retrieve");
   const qEmb = await embedText(`${spec.normalizedView} ${spec.interpretation} ${spec.mechanism}`);
   const skip = new Set((cp0.screenedSymbols ?? []).map((s) => s.toUpperCase()));
   let relevant = mergePicks([], cp0.picks);
   if (skip.size < universe.length) {
-    await emit("retrieve", `Reading ${universe.length - skip.size} remaining Robinhood Chain names`);
+    await emit("retrieve", world === "MEMES"
+      ? `Reading ${universe.length - skip.size} remaining launchpad coins`
+      : `Reading ${universe.length - skip.size} remaining names on this desk`);
     const more = await screenCatalog({
       universe,
       interpretation: spec.interpretation,
@@ -151,6 +284,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
       angles: spec.angles,
       queryEmbedding: qEmb,
       skipSymbols: skip,
+      prompt: world === "MEMES" ? MEME_SCREENER_PROMPT : undefined,
       onBatch: async (info) => {
         await patchCheckpoint(runId, { picks: info.batchPicks, screenedSymbols: info.batchSymbols });
         await emit("retrieve", `Screened ${info.done}/${info.total} remaining batches · ${info.found + relevant.length} relevant`);
@@ -158,9 +292,13 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
     });
     relevant = mergePicks(relevant, more);
   } else {
-    await emit("retrieve", `Reusing screen of ${relevant.length} companies`);
+    await emit("retrieve", world === "MEMES"
+      ? `Reusing screen of ${relevant.length} coins`
+      : `Reusing screen of ${relevant.length} companies`);
   }
-  await emit("retrieve", `${relevant.length} companies look relevant`, { picks: relevant.slice(0, 24) });
+  await emit("retrieve", world === "MEMES"
+    ? `${relevant.length} coins look relevant`
+    : `${relevant.length} companies look relevant`, { picks: relevant.slice(0, 24) });
 
   await setStage(runId, "DISCOVERING", "discover");
   const discoveredNotes: string[] = [...(cp0.discoveredNotes ?? [])];
@@ -181,7 +319,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
         discoveredNotes.push(
           hit
             ? `• ${row.name} → ${hit.symbol} (${angle?.name ?? "discover"})`
-            : `• ${row.name} considered, not on Robinhood Chain`
+            : `• ${row.name} considered, not on this desk`
         );
         if (hit && !relevant.some((p) => p.symbol.toUpperCase() === hit.symbol.toUpperCase())) {
           relevant.push({
@@ -194,12 +332,39 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
         }
       }
       await patchCheckpoint(runId, { discoveredNotes, discoverDone: true, picks: relevant });
-      await emit("discover", found.length ? `Matched ${found.length} extra names` : "Catalog screen covers this view", {
-        found: found.map((f) => f.name)
-      });
+      const mapped = found.filter((row) => matchNameToUniverse(row.name, universe)).length;
+      await emit(
+        "discover",
+        found.length
+          ? world === "MEMES"
+            ? `Mapped ${mapped} of ${found.length} search hits onto this desk`
+            : `Matched ${found.length} extra names`
+          : "Catalog screen covers this view",
+        { found: found.map((f) => f.name) }
+      );
     } catch (e) {
       await emit("discover", "Web search skipped", { error: String(e) });
       await patchCheckpoint(runId, { discoverDone: true, discoveredNotes });
+    }
+  }
+
+  if (world === "MEMES") {
+    const have = new Set(relevant.map((p) => p.symbol.toUpperCase()));
+    const need = Math.max(MEME_MIN_HOLDINGS, Math.min(6, universe.length));
+    for (const u of orderByThesis(universe, qEmb)) {
+      if (relevant.length >= need) break;
+      if (have.has(u.symbol.toUpperCase()) || u.halt) continue;
+      have.add(u.symbol.toUpperCase());
+      relevant.push({
+        symbol: u.symbol,
+        relevant: true,
+        angle: "theme",
+        ring: "shared_interest",
+        reason: "On this desk and fits the launchpad theme"
+      });
+    }
+    if (relevant.length) {
+      await emit("retrieve", `Desk fill · ${relevant.length} coins in the working set`);
     }
   }
 
@@ -278,30 +443,16 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
   }
   for (let i = 0; i < analystRemaining.length; i += 8) {
     const slice = analystRemaining.slice(i, i + 8);
-    const batchOut = await genObject({
-      model: researchModel(),
-      schema: analystBatchSchema,
-      label: "analyst",
-      prompt: fill(ANALYST_PROMPT, {
+    const batchOut = await scoreAnalystSlice(
+      slice,
+      fill(ANALYST_PROMPT, {
         normalizedView: spec.normalizedView,
         interpretation: spec.interpretation,
         horizon: spec.horizon
-      }) +
-        `\nCandidates:\n` +
-        slice
-          .map((p) => {
-            const u = bySymbol.get(p.symbol.toUpperCase());
-            return JSON.stringify({
-              symbol: p.symbol,
-              name: u?.legalName,
-              sector: u?.sector,
-              reason: p.reason,
-              ring: p.ring,
-              diligence: diligence.get(p.symbol) ?? diligence.get(p.symbol.toUpperCase()) ?? u?.businessSummary
-            });
-          })
-          .join("\n")
-    });
+      }),
+      bySymbol,
+      diligence
+    );
     analystItems.push(...batchOut.items);
     await patchCheckpoint(runId, { analystItems });
     await emit("analyst", `Scored ${analystItems.length} names`);
@@ -346,6 +497,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
         label: "critic",
         prompt: fill(CRITIC_PROMPT, {
           view,
+          skyRead: spec.skyRead ?? "",
           portfolio: JSON.stringify(pm),
           evidence: discoveredNotes.slice(0, 40).join("\n")
         })
@@ -372,10 +524,10 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
 
   const named = new Map(pm.holdings.map((h) => [h.symbol.toUpperCase(), h]));
   const candidates = scored
-    .filter((s) => named.has(s.u.symbol.toUpperCase()) || named.has(s.u.symbol.replace(/^RH/i, "").toUpperCase()))
+    .filter((s) => named.has(s.u.symbol.toUpperCase()) || named.has(displaySymbol(s.u.symbol).toUpperCase()))
     .map((s) => {
       const pmh =
-        named.get(s.u.symbol.toUpperCase()) ?? named.get(s.u.symbol.replace(/^RH/i, "").toUpperCase());
+        named.get(s.u.symbol.toUpperCase()) ?? named.get(displaySymbol(s.u.symbol).toUpperCase());
       return {
         tokenId: s.u.tokenId,
         symbol: s.u.symbol,
@@ -394,7 +546,8 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
 
   const single = /nvda|tsla|aapl|msft|amd|meta|googl/i.test(view) && spec.angles.length <= 3;
   let constructed = constructPortfolio(candidates, Math.round((pm.cashPct / 100) * 10_000), {
-    singleTickerAnchor: single
+    singleTickerAnchor: single,
+    world
   });
   if (!constructed.ok) {
     constructed = constructPortfolio(
@@ -412,7 +565,23 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
         riskPenalty: s.item.riskPenalty
       })),
       500,
-      { singleTickerAnchor: single }
+      { singleTickerAnchor: single, world }
+    );
+  }
+  if (!constructed.ok && world === "MEMES") {
+    constructed = constructPortfolio(
+      universe.filter((u) => !u.halt).slice(0, 8).map((u) => ({
+        tokenId: u.tokenId,
+        symbol: u.symbol,
+        actionId: u.tokenId,
+        sector: u.sector ?? undefined,
+        exposure: 0.5,
+        confidence: 0.5,
+        halt: false,
+        role: "shared_interest" as HoldingRole
+      })),
+      500,
+      { world }
     );
   }
   if (!constructed.ok) {

@@ -18,10 +18,14 @@ function formatMoney(n: number) {
 export function InvestDialog({
   takeId,
   sentence,
+  chainId,
+  world,
   onClose
 }: {
   takeId: string | null;
   sentence?: string | null;
+  chainId?: number | null;
+  world?: "STOCKS" | "MEMES" | null;
   onClose: () => void;
 }) {
   const fetchApi = useAuthedFetch();
@@ -250,8 +254,12 @@ export function InvestDialog({
                 </div>
                 <p className="mt-8 text-[13px] leading-relaxed text-muted">
                   {live
-                    ? "This spends real USDG from your Privy wallet after you confirm. Stock tokens are economic exposure, not share ownership."
-                    : "Paper uses live marks without live money. Stock tokens are economic exposure, not share ownership."}
+                    ? chainId === 101
+                      ? "This spends live USDC from your Solana wallet after you confirm. Keep 0.03 SOL in the wallet for fees."
+                      : "This spends real USDG from your Privy wallet after you confirm. Stock tokens are economic exposure, not share ownership."
+                    : world === "MEMES"
+                      ? "Paper uses live marks without live money. Meme quotes older than two minutes are treated as stale."
+                      : "Paper uses live marks without live money. Stock tokens are economic exposure, not share ownership."}
                 </p>
                 <label className="mt-4 flex items-start gap-3 text-[13px] text-ink">
                   <input

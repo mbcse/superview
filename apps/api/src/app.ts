@@ -2,6 +2,8 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
 import { loadEnv } from "@takeandstake/config";
+import { parseWorld, parseChainId, cashTokenId, DESKS, isMintOrContract, sourceRestricted } from "@takeandstake/shared";
+import { syncBagsCatalog, syncJupiterMemeCatalog, syncXStocksCatalog } from "@takeandstake/markets";
 import { prisma } from "@takeandstake/db";
 import { depositPaperUsd, executePaperRebalance, runDryRunInvest, withdrawPaperUsd } from "./services/paper-invest.js";
 import { runLiveInvest } from "./services/live-invest.js";
@@ -23,6 +25,7 @@ import {
   inheritAliasChg,
   attachDayChange,
   QUOTES_CACHE_KEY,
+  QUOTES_ASSET_KEY,
   backingPrivacy,
   sanitizeBacking,
   visibleComments,
@@ -40,6 +43,7 @@ import { socialRouter } from "./routes/social.js";
 import { deskRouter } from "./routes/desk.js";
 import { streamRouter } from "./routes/stream.js";
 import { redis } from "./redis.js";
+import { hitRateLimit, LIMIT_INVEST, LIMIT_WITHDRAW } from "./rate-limit.js";
 
 function pid(req: Request, key: string) {
   const v = req.params[key];
@@ -67,7 +71,7 @@ function webOrigins(primary: string) {
 
 const env = loadEnv();
 export const app = express();
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors({ origin: webOrigins(env.WEB_ORIGIN), credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use((req, res, next) => {
@@ -99,17 +103,140 @@ app.get("/v1/flags", async (_req, res) => {
   res.json({ flags });
 });
 
-app.get("/v1/catalog", async (_req, res) => {
-  const tokens = await prisma.stockToken.findMany({ include: { universe: true } });
-  res.json({ tokens, disclaimer: STOCK_TOKEN_COPY });
+app.get("/v1/worlds", async (_req, res) => {
+  const flags = await prisma.featureFlag.findMany();
+  const on = (k: string) => Boolean(flags.find((f) => f.key === k)?.enabled);
+  res.json({
+    desks: DESKS.map((d) => ({
+      ...d,
+      live:
+        d.live &&
+        (d.world === "MEMES"
+          ? d.chainId === 4663
+            ? on("live_rh_bags")
+            : on("live_trading_memes")
+          : d.chainId === 101
+            ? on("live_trading_xstocks")
+            : on("live_trading"))
+    }))
+  });
+});
+
+app.get("/v1/assets/:id", async (req, res) => {
+  const token = await prisma.stockToken.findUnique({
+    where: { id: pid(req, "id") },
+    include: { universe: true }
+  });
+  if (!token) return res.status(404).json({ error: "not_found" });
+  res.json({
+    id: token.id,
+    symbol: token.symbol,
+    name: token.name,
+    chainId: token.chainId,
+    world: token.world,
+    source: token.source,
+    venue: token.venue,
+    decimals: token.decimals,
+    contractAddress: token.contractAddress,
+    logoUrl: token.logoUrl,
+    liquidityUsd: token.liquidityUsd,
+    launchedAt: token.launchedAt,
+    riskFlags: token.riskFlags,
+    universe: token.universe
+  });
+});
+
+app.get("/v1/assets/by-address/:chainId/:address", async (req, res) => {
+  const chainId = Number(pid(req, "chainId"));
+  const address = pid(req, "address");
+  const token = await prisma.stockToken.findUnique({
+    where: { chainId_contractAddress: { chainId, contractAddress: address } },
+    include: { universe: true }
+  });
+  if (!token) return res.status(404).json({ error: "not_found" });
+  res.redirect(302, `/v1/assets/${token.id}`);
+});
+
+app.get("/v1/catalog", async (req, res) => {
+  const world = parseWorld(req.query.world);
+  const chainId = req.query.chainId != null ? parseChainId(req.query.chainId, world) : undefined;
+  const source = req.query.source ? String(req.query.source).toUpperCase() : undefined;
+  const venue = req.query.venue ? String(req.query.venue).toUpperCase() : undefined;
+  const q = String(req.query.q ?? "").trim();
+  const minLiquidity = Number(req.query.minLiquidity ?? 0);
+  const cursor = req.query.cursor ? String(req.query.cursor) : undefined;
+  const tokens = await prisma.stockToken.findMany({
+    where: {
+      world,
+      status: "ACTIVE",
+      ...(chainId ? { chainId } : {}),
+      ...(source ? { source: source as never } : {}),
+      ...(venue ? { venue: venue as never } : {}),
+      ...(q
+        ? {
+            OR: [
+              { symbol: { contains: q, mode: "insensitive" } },
+              { name: { contains: q, mode: "insensitive" } },
+              { contractAddress: { contains: q } }
+            ]
+          }
+        : {}),
+      ...(minLiquidity > 0 ? { liquidityUsd: { gte: minLiquidity } } : {})
+    },
+    include: { universe: true },
+    orderBy: { id: "asc" },
+    take: 200,
+    ...(cursor ? { skip: 1, cursor: { id: cursor } } : {})
+  });
+  const visible = tokens.filter((t) => !(t.riskFlags as { isSus?: boolean } | null)?.isSus);
+  const rows = visible.map((t) => ({
+    id: t.id,
+    symbol: t.symbol,
+    name: t.name,
+    chainId: t.chainId,
+    world: t.world,
+    source: t.source,
+    venue: t.venue,
+    decimals: t.decimals,
+    contractAddress: t.contractAddress,
+    logoUrl: t.logoUrl,
+    liquidityUsd: t.liquidityUsd,
+    universe: t.universe,
+    companyKey: t.universe?.isin || t.universe?.legalName || t.name
+  }));
+  const groups = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const key = world === "STOCKS" ? String(row.companyKey ?? row.symbol) : row.id;
+    const list = groups.get(key) ?? [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  res.json({
+    tokens: rows,
+    listings: [...groups.values()].map((list) => ({
+      name: list[0]?.name,
+      listings: list.map((t) => ({
+        id: t.id,
+        symbol: t.symbol,
+        chainId: t.chainId,
+        source: t.source,
+        contractAddress: t.contractAddress
+      }))
+    })),
+    nextCursor: rows.at(-1)?.id ?? null,
+    disclaimer: STOCK_TOKEN_COPY
+  });
 });
 
 app.post("/v1/catalog/sync", requireAdmin, async (_req, res) => {
   try {
     const r = await syncRobinhoodCatalog();
+    const xstocks = await syncXStocksCatalog().catch((e) => ({ error: String(e) }));
+    const bags = await syncBagsCatalog().catch((e) => ({ error: String(e) }));
+    const memes = await syncJupiterMemeCatalog().catch((e) => ({ error: String(e) }));
     const actions = await syncCorporateActions().catch((e) => ({ error: String(e) }));
     const enrich = await enrichStale(12);
-    res.json({ ...r, actions, enrich });
+    res.json({ ...r, xstocks, bags, memes, actions, enrich });
   } catch (e) {
     res.status(502).json({ error: "catalog_sync_failed", detail: String(e) });
   }
@@ -141,28 +268,47 @@ app.get("/v1/tokens/:symbol", async (req, res) => {
 });
 
 app.get("/v1/quotes", async (req, res) => {
-  const symbols = String(req.query.symbols ?? "")
+  const symbols = String(req.query.ids ?? req.query.symbols ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  let quotes: Array<{ symbol: string; last?: number | null; chgPct?: number | null }> = [];
+  let quotes: Array<{ symbol: string; tokenId?: string; last?: number | null; chgPct?: number | null }> = [];
   let at = new Date().toISOString();
+  const ids = symbols.filter((s) => s.length > 16 && !s.includes(" "));
+  if (ids.length) {
+    try {
+      const rows = await redis.hmget(QUOTES_ASSET_KEY, ...ids);
+      for (const row of rows) {
+        if (!row) continue;
+        const q = JSON.parse(row) as { symbol: string; tokenId?: string; last?: number | null; chgPct?: number | null };
+        quotes.push(q);
+      }
+    } catch {
+      /* fall through */
+    }
+  }
   try {
     const cached = await redis.get(QUOTES_CACHE_KEY);
     if (cached) {
-      const parsed = JSON.parse(cached) as { quotes?: Array<{ symbol: string; last?: number | null; chgPct?: number | null }>; at?: string };
-      quotes = filterQuotes(parsed.quotes ?? [], symbols.length ? symbols : undefined);
+      const parsed = JSON.parse(cached) as { quotes?: Array<{ symbol: string; tokenId?: string; last?: number | null; chgPct?: number | null }>; at?: string };
+      const extra = filterQuotes(parsed.quotes ?? [], symbols.length ? symbols : undefined);
+      const seen = new Set(quotes.map((q) => String(q.tokenId ?? q.symbol).toUpperCase()));
+      for (const q of extra) {
+        const key = String(q.tokenId ?? q.symbol).toUpperCase();
+        if (!seen.has(key)) quotes.push(q);
+      }
       at = parsed.at ?? at;
     }
   } catch {
     /* fall through */
   }
-  const missing = symbols.filter((s) => !quoteHasSymbol(quotes, s));
+  const missing = symbols.filter((s) => !quoteHasSymbol(quotes, s) && !quotes.some((q) => String(q.tokenId ?? "").toUpperCase() === s.toUpperCase()));
   if (!quotes.length || missing.length) {
     const extra = await listQuotes(missing.length ? missing : symbols.length ? symbols : undefined);
-    const seen = new Set(quotes.map((q) => q.symbol.toUpperCase()));
+    const seen = new Set(quotes.map((q) => String(q.tokenId ?? q.symbol).toUpperCase()));
     for (const q of extra) {
-      if (!seen.has(q.symbol.toUpperCase())) quotes.push(q);
+      const key = String(q.tokenId ?? q.symbol).toUpperCase();
+      if (!seen.has(key)) quotes.push(q);
     }
   }
   res.json({ quotes: await attachDayChange(inheritAliasChg(quotes)), at });
@@ -229,8 +375,14 @@ app.get("/v1/takes/:id", optionalAuth, async (req, res) => {
           })
         )
       : false;
+  const author = {
+    id: take.author.id,
+    handle: take.author.handle,
+    displayName: take.author.displayName,
+    avatar: take.author.avatar
+  };
   res.json({
-    take: { ...take, backings, comments: visibleComments(take.comments) },
+    take: { ...take, author, backings, comments: visibleComments(take.comments) },
     disclaimer: STOCK_TOKEN_COPY,
     following,
     mine,
@@ -365,6 +517,10 @@ app.post("/v1/takes/:id/publish", requireAuth, async (req, res) => {
       }
     });
     const last = await prisma.takeRevision.count({ where: { takeId: take.id } });
+    const priorRev = await prisma.takeRevision.findFirst({
+      where: { takeId: take.id },
+      orderBy: { number: "desc" }
+    });
     const canonical = {
       sentence: run.thesis?.normalizedTake,
       holdings: constructed.holdings,
@@ -376,6 +532,7 @@ app.post("/v1/takes/:id/publish", requireAuth, async (req, res) => {
         takeId: take.id,
         number: last + 1,
         sentence: run.thesis?.normalizedTake ?? "Untitled take",
+        astrologyChart: priorRev?.astrologyChart,
         horizon: run.thesis?.horizon,
         falsifier: Array.isArray(run.thesis?.falsifiers)
           ? String((run.thesis?.falsifiers as string[])[0] ?? "")
@@ -409,6 +566,57 @@ app.post("/v1/takes/:id/publish", requireAuth, async (req, res) => {
   }
 });
 
+async function enqueueLiveOrder(opts: {
+  pocketId: string;
+  userId: string;
+  amountUsd?: number;
+  idempotencyKey: string;
+  kind?: "INVEST" | "WITHDRAW";
+  to?: string;
+}) {
+  const existing = await prisma.order.findUnique({ where: { idempotencyKey: opts.idempotencyKey } });
+  if (existing) return { orderId: existing.id, status: existing.status, queued: true, idempotent: true };
+  const order = await prisma.order.create({
+    data: {
+      pocketId: opts.pocketId,
+      mode: "LIVE",
+      kind: opts.kind === "WITHDRAW" ? "EXIT" : "INVEST",
+      status: "SUBMITTING",
+      idempotencyKey: opts.idempotencyKey
+    }
+  });
+  const { Queue } = await import("bullmq");
+  const q = new Queue("execution", { connection: redis });
+  await q.add(
+    opts.kind === "WITHDRAW" ? "live-withdraw" : "live-invest",
+    { ...opts, orderId: order.id },
+    { jobId: opts.idempotencyKey, attempts: 3, backoff: { type: "exponential", delay: 8_000 } }
+  );
+  return { orderId: order.id, queued: true, status: "SUBMITTING" as const };
+}
+
+app.post("/v1/takes/:id/invest", requireAuth, async (req, res) => {
+  const access = await requirePublishedTake(pid(req, "id"), req.user!.id);
+  if (!access.ok) return res.status(access.status).json({ error: access.error });
+  const mode = String(req.body?.mode ?? "paper").toLowerCase();
+  const amountUsd = Number(req.body?.amountUsd);
+  const idempotencyKey = String(req.body?.idempotencyKey ?? `inv:${access.take.id}:${req.user!.id}:${Date.now()}`);
+  const pocketMode = mode === "live" ? "LIVE" : "DRY_RUN";
+  const pocket = await prisma.pocket.findFirst({
+    where: { userId: req.user!.id, takeId: access.take.id, mode: pocketMode }
+  });
+  if (!pocket) return res.status(404).json({ error: "no_pocket" });
+  if (pocketMode === "DRY_RUN") {
+    if (Number.isFinite(amountUsd) && amountUsd > 0) await depositPaperUsd(pocket.id, amountUsd);
+    const result = await runDryRunInvest(pocket.id, env);
+    return res.json(result);
+  }
+  if (!(await hitRateLimit(redis, `invest:${req.user!.id}`, LIMIT_INVEST.max, LIMIT_INVEST.windowMs))) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  res.json(await enqueueLiveOrder({ pocketId: pocket.id, userId: req.user!.id, amountUsd, idempotencyKey }));
+});
+
 app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
   try {
   const parsed = backRequestSchema.safeParse(req.body);
@@ -418,9 +626,25 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
   if (!access.ok) return res.status(access.status).json({ error: access.error });
   const take = access.take;
   if (parsed.data.level === "LIVE") {
-    const live = await prisma.featureFlag.findUnique({ where: { key: "live_trading" } });
+    const flagKey =
+      take.world === "MEMES"
+        ? take.chainId === 4663
+          ? "live_rh_bags"
+          : "live_trading_memes"
+        : take.chainId === 101
+          ? "live_trading_xstocks"
+          : "live_trading";
+    const live = await prisma.featureFlag.findUnique({ where: { key: flagKey } });
     if (!live?.enabled) return res.status(403).json({ error: "live_trading_disabled" });
     if (user.jurisdictionStatus === "RESTRICTED") return res.status(403).json({ error: "restricted_jurisdiction" });
+    const source =
+      take.world === "MEMES" ? "MEMES" : take.chainId === 101 ? "XSTOCKS" : "ROBINHOOD";
+    const profile = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { country: true, memesRiskAckAt: true }
+    });
+    if (sourceRestricted(source, profile?.country)) return res.status(403).json({ error: "restricted_jurisdiction" });
+    if (take.world === "MEMES" && !profile?.memesRiskAckAt) return res.status(403).json({ error: "memes_ack_required" });
   }
   const pocket = await prisma.pocket.upsert({
     where: { userId_takeId_mode: { userId: user.id, takeId: take.id, mode: parsed.data.level } },
@@ -433,7 +657,7 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
       update: { mode: parsed.data.mandateMode },
       create: {
         pocketId: pocket.id,
-        mode: parsed.data.mandateMode,
+        mode: take.world === "MEMES" && parsed.data.level === "LIVE" ? "APPROVAL" : parsed.data.mandateMode,
         cashMinBps: parsed.data.cashMinBps ?? 0,
         cashMaxBps: parsed.data.cashMaxBps ?? 2000,
         maxTurnoverDailyBps: parsed.data.maxTurnoverDailyBps ?? 1000,
@@ -441,10 +665,11 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
         allowNewNames: parsed.data.allowNewNames ?? true
       }
     });
+    const cashId = cashTokenId(take.world ?? "STOCKS", take.chainId ?? 4663);
     const cash = await prisma.ledgerAccount.upsert({
-      where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "CASH", tokenId: "USDG" } },
+      where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "CASH", tokenId: cashId } },
       update: {},
-      create: { pocketId: pocket.id, kind: "CASH", tokenId: "USDG" }
+      create: { pocketId: pocket.id, kind: "CASH", tokenId: cashId }
     });
     if (parsed.data.level === "DRY_RUN") {
       const already = await prisma.ledgerEntry.count({ where: { accountId: cash.id } });
@@ -532,18 +757,55 @@ app.post("/v1/pockets/:id/live-invest", requireAuth, async (req, res) => {
   const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
   if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
   const amountUsd = Number(req.body?.amountUsd);
-  const result = await runLiveInvest(
-    pid(req, "id"),
-    env,
-    req.user!.id,
-    Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : undefined
-  );
-  if ("error" in result) {
-    const code = result.error;
-    const status = code === "not_found" ? 404 : code === "live_disabled" || code === "paused" ? 403 : 400;
-    return res.status(status).json({ error: code });
+  const idempotencyKey = String(req.body?.idempotencyKey ?? `live:${owned.pocket.id}:${Date.now()}`);
+  if (!(await hitRateLimit(redis, `invest:${req.user!.id}`, LIMIT_INVEST.max, LIMIT_INVEST.windowMs))) {
+    return res.status(429).json({ error: "rate_limited" });
   }
-  res.json(result);
+  res.json(
+    await enqueueLiveOrder({
+      pocketId: owned.pocket.id,
+      userId: req.user!.id,
+      amountUsd: Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : undefined,
+      idempotencyKey
+    })
+  );
+});
+
+app.post("/v1/me/memes-ack", requireAuth, async (req, res) => {
+  await prisma.user.update({
+    where: { id: req.user!.id },
+    data: { memesRiskAckAt: new Date() }
+  });
+  res.json({ ok: true });
+});
+
+app.get("/v1/media/token", async (req, res) => {
+  const src = String(req.query.src ?? "");
+  let host = "";
+  try {
+    host = new URL(src).hostname;
+  } catch {
+    return res.status(400).json({ error: "bad_url" });
+  }
+  const allow = /(jup\.ag|bags\.fm|ipfs\.io|arweave\.net|cloudfront\.net|xstocks|backed\.fi|dexscreener|robinhood)\.?/i;
+  if (!allow.test(host)) return res.status(400).json({ error: "blocked_host" });
+  const remote = await fetch(src, {
+    headers: {
+      accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      "user-agent": "Mozilla/5.0 (compatible; SuperView/1.0)"
+    }
+  }).catch(() => null);
+  if (!remote?.ok) return res.status(502).json({ error: "fetch_failed" });
+  const type = remote.headers.get("content-type") ?? "";
+  if (!type.startsWith("image/")) return res.status(415).json({ error: "not_image" });
+  const announced = Number(remote.headers.get("content-length") ?? 0);
+  if (announced > 2_000_000) return res.status(413).json({ error: "too_large" });
+  const buf = Buffer.from(await remote.arrayBuffer());
+  if (buf.length > 2_000_000) return res.status(413).json({ error: "too_large" });
+  res.setHeader("content-type", type);
+  res.setHeader("cache-control", "public, max-age=86400");
+  res.setHeader("cross-origin-resource-policy", "cross-origin");
+  res.send(buf);
 });
 
 app.post("/v1/wallets/:id/grant", requireAuth, async (req, res) => {
@@ -570,10 +832,40 @@ app.post("/v1/wallets/:id/grant", requireAuth, async (req, res) => {
   res.json({ grant });
 });
 
+app.post("/v1/wallets/solana/link", requireAuth, async (req, res) => {
+  const address = String(req.body?.address ?? "");
+  const privyWalletId = String(req.body?.privyWalletId ?? "") || undefined;
+  if (!isMintOrContract(address, 101)) return res.status(400).json({ error: "bad_solana_address" });
+  const wallet = await prisma.wallet.upsert({
+    where: { address_chainId: { address, chainId: 101 } },
+    update: { userId: req.user!.id, privyWalletId, isPrimary: false },
+    create: { userId: req.user!.id, address, chainId: 101, privyWalletId, isPrimary: false, type: "EMBEDDED" }
+  });
+  res.json({ wallet: { id: wallet.id, address: wallet.address, chainId: wallet.chainId } });
+});
+
+app.post("/v1/wallets/solana/withdraw", requireAuth, async (req, res) => {
+  const to = String(req.body?.to ?? "");
+  const amountUsd = Number(req.body?.amountUsd);
+  if (!isMintOrContract(to, 101)) return res.status(400).json({ error: "bad_solana_address" });
+  if (!(amountUsd > 0)) return res.status(400).json({ error: "bad_amount" });
+  const pocket = await prisma.pocket.findFirst({
+    where: { userId: req.user!.id, mode: "LIVE", take: { chainId: 101 } },
+    orderBy: { createdAt: "desc" }
+  });
+  if (!pocket) return res.status(404).json({ error: "no_solana_pocket" });
+  const idempotencyKey = String(req.body?.idempotencyKey ?? `wd:${req.user!.id}:${Math.round(amountUsd * 100)}:${to}`);
+  if (!(await hitRateLimit(redis, `withdraw:${req.user!.id}`, LIMIT_WITHDRAW.max, LIMIT_WITHDRAW.windowMs))) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  res.json(await enqueueLiveOrder({ pocketId: pocket.id, userId: req.user!.id, amountUsd, idempotencyKey, kind: "WITHDRAW", to }));
+});
+
 app.get("/v1/pockets", requireAuth, async (req, res) => {
   const user = req.user!;
+  const world = req.query.world ? parseWorld(req.query.world) : undefined;
   const pockets = await prisma.pocket.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, ...(world ? { take: { world } } : {}) },
     include: {
       take: {
         include: {
@@ -952,6 +1244,17 @@ app.post("/v1/admin/flags/:key", requireAdmin, async (req, res) => {
     create: { key: pid(req, "key"), enabled: Boolean(req.body.enabled) }
   });
   res.json({ flag });
+});
+
+app.post("/v1/admin/live-smoke", requireAdmin, async (req, res) => {
+  const flag = await prisma.featureFlag.findUnique({ where: { key: "admin_live_smoke" } });
+  if (!flag?.enabled) return res.status(403).json({ error: "smoke_disabled" });
+  const amountUsd = Math.min(1, Number(req.body?.amountUsd ?? 1));
+  const { Queue } = await import("bullmq");
+  const q = new Queue("execution", { connection: redis });
+  const idempotencyKey = `smoke:${req.user!.id}:${Date.now()}`;
+  await q.add("live-smoke", { userId: req.user!.id, amountUsd, idempotencyKey, kind: "INVEST" }, { jobId: idempotencyKey });
+  res.json({ queued: true, amountUsd, idempotencyKey });
 });
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

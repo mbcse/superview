@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayChangePct, inheritAliasChg, isNyWeekend, lastCashSessionStart, lookupPx, sessionLast, setPriceAliases } from "./prices.js";
+import { dayChangePct, filterQuotes, inheritAliasChg, isNyWeekend, lastCashSessionStart, lookupPx, quoteHasSymbol, sessionLast, setPriceAliases } from "./prices.js";
 
 describe("day change", () => {
   it("uses previous close, not a same-print zero", () => {
@@ -14,6 +14,14 @@ describe("day change", () => {
     setPriceAliases(book, "NVDA", 120);
     expect(lookupPx(book, "RHNVDA")).toBe(120);
     expect(lookupPx(book, "nvda")).toBe(120);
+  });
+
+  it("keeps xStocks last prints off the Robinhood NVDA key", () => {
+    const book = new Map<string, number>();
+    setPriceAliases(book, "NVDA", 120, "ROBINHOOD");
+    setPriceAliases(book, "NVDAx", 118.4, "XSTOCKS");
+    expect(lookupPx(book, "NVDAx", "XSTOCKS")).toBe(118.4);
+    expect(lookupPx(book, "NVDA", "ROBINHOOD")).toBe(120);
   });
 
   it("uses Friday as the last cash session on Sunday", () => {
@@ -63,5 +71,12 @@ describe("day change", () => {
       { symbol: "RHNVDA", chgPct: 0 }
     ]);
     expect(quotes[1]?.chgPct).toBeCloseTo(0.012);
+  });
+
+  it("matches xStocks tickers regardless of trailing-x case", () => {
+    const quotes = [{ symbol: "AAPLx", tokenId: "tok_aapl" }];
+    expect(quoteHasSymbol(quotes, "AAPLX")).toBe(true);
+    expect(filterQuotes(quotes, ["AAPLX"])).toHaveLength(1);
+    expect(filterQuotes(quotes, ["tok_aapl"])).toHaveLength(1);
   });
 });

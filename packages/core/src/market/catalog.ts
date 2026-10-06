@@ -45,11 +45,15 @@ export async function syncRobinhoodCatalog() {
     const name = displayName(String(asset.tokenName ?? symbol), symbol);
     const feedAddress = feeds.get(symbol) ?? KNOWN_FEEDS[symbol] ?? undefined;
     const token = await prisma.stockToken.upsert({
-      where: { symbol_chainId: { symbol, chainId: 4663 } },
+      where: { chainId_contractAddress: { chainId: 4663, contractAddress: address } },
       update: {
+        symbol,
         name,
-        contractAddress: address,
         snapshotId: snapshot.id,
+        world: "STOCKS",
+        source: "ROBINHOOD",
+        venue: "RH_BOOK",
+        decimals: 18,
         rhjId: asset.id,
         isin: asset.isin,
         currentMultiplier: asset.currentMultiplier ?? undefined,
@@ -64,6 +68,11 @@ export async function syncRobinhoodCatalog() {
         symbol,
         name,
         contractAddress: address,
+        chainId: 4663,
+        world: "STOCKS",
+        source: "ROBINHOOD",
+        venue: "RH_BOOK",
+        decimals: 18,
         snapshotId: snapshot.id,
         rhjId: asset.id,
         isin: asset.isin,

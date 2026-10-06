@@ -4,13 +4,15 @@ import Link from "next/link";
 import { MotionStage } from "@/components/marketing/motion-stage";
 import { HowItWorksFilm, HowItWorksStill, HOW_DURATION, HOW_FPS, HOW_HEIGHT, HOW_WIDTH } from "@/remotion/how-it-works";
 import { TokenMarket, TokenMarketStill, TOKEN_DURATION, TOKEN_FPS, TOKEN_HEIGHT, TOKEN_WIDTH } from "@/remotion/token-market";
+import { MemeDesk, MemeDeskStill, MEME_DURATION, MEME_FPS, MEME_HEIGHT, MEME_WIDTH } from "@/remotion/meme-desk";
+import { AstrologyView, AstrologyViewStill, ASTRO_DURATION, ASTRO_FPS, ASTRO_HEIGHT, ASTRO_WIDTH } from "@/remotion/astrology-view";
 import { VsSpyGraph, VsSpyStill, GRAPH_DURATION, GRAPH_FPS, GRAPH_HEIGHT, GRAPH_WIDTH } from "@/remotion/vs-spy";
 import { InvestFlow, InvestFlowStill, INVEST_DURATION, INVEST_FPS, INVEST_HEIGHT, INVEST_WIDTH } from "@/remotion/invest-flow";
 
 const STEPS = [
-  { title: "Write", body: "A short belief about the world, in your own words." },
-  { title: "Research", body: "SuperView maps the view to listed companies on Robinhood Chain." },
-  { title: "Basket", body: "Weights, roles, and a live score versus the S&P 500." },
+  { title: "Write", body: "A short belief about the world — or an astrology chart — in your own words." },
+  { title: "Research", body: "The agent maps it to stock tokens across chains, or to memecoins if that’s the desk." },
+  { title: "Basket", body: "Weights, roles, and a live score versus the S&P 500 or SOL." },
   { title: "Invest", body: "Paper first, against live quotes. Live USDG when you are ready." }
 ] as const;
 
@@ -20,7 +22,7 @@ export function LandingStory() {
       <section id="how" className="mx-auto w-[min(1080px,calc(100%-24px))] scroll-mt-24 py-20 md:py-24">
         <h2 className="display max-w-[18ch] text-[28px] text-ink md:text-[36px]">A view becomes a basket</h2>
         <p className="mt-4 max-w-[38rem] text-[16px] leading-relaxed text-muted">
-          You write a sentence. An agent finds the companies, sizes the weights, and keeps watching as the story changes.
+          You write a sentence. An agent finds what it touches, sizes the weights, and keeps watching as the story changes.
         </p>
         <div className="mt-8">
           <MotionStage
@@ -46,14 +48,14 @@ export function LandingStory() {
       <section id="tokens" className="mx-auto w-[min(1080px,calc(100%-24px))] scroll-mt-24 py-20 md:py-24">
         <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]">
           <div>
-            <h2 className="display max-w-[14ch] text-[28px] text-ink md:text-[36px]">Stock tokens, not shares</h2>
+            <h2 className="display max-w-[16ch] text-[28px] text-ink md:text-[36px]">Stock tokens, on more than one chain</h2>
             <p className="mt-4 max-w-[36rem] text-[16px] leading-relaxed text-muted">
-              SuperView invests in Robinhood Chain stock tokens. They track listed companies and give economic exposure, not
-              share ownership.
+              SuperView invests in stock tokens across multiple blockchains. They track listed companies and give economic
+              exposure, not share ownership.
             </p>
             <p className="mt-4 max-w-[36rem] text-[16px] leading-relaxed text-muted">
-              Quotes are live. Paper USDG is a simulated ledger filled against those quotes. Live trading spends USDG from
-              your wallet.
+              Pick the chain when you write the view. Quotes are live. Paper USDG is a simulated ledger filled against those
+              quotes. Live trading spends USDG from your wallet.
             </p>
             <p className="mt-4 max-w-[36rem] text-[16px] leading-relaxed text-muted">
               Access is restricted in the United States, United Kingdom, Canada, Switzerland, the UAE, and other countries.{" "}
@@ -74,11 +76,56 @@ export function LandingStory() {
         </div>
       </section>
 
+      <section id="memes" className="mx-auto w-[min(1080px,calc(100%-24px))] scroll-mt-24 py-20 md:py-24">
+        <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)]">
+          <MotionStage
+            component={MemeDesk}
+            still={<MemeDeskStill />}
+            durationInFrames={MEME_DURATION}
+            fps={MEME_FPS}
+            width={MEME_WIDTH}
+            height={MEME_HEIGHT}
+            label="Memecoins on their own desk, marked versus SOL"
+          />
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-teal">Memecoins</p>
+            <h2 className="display mt-3 max-w-[16ch] text-[28px] text-ink md:text-[36px]">Memecoins stay on their own book</h2>
+            <p className="mt-4 max-w-[36rem] text-[16px] leading-relaxed text-muted">
+              Switch to Memes and the agent screens launchpad coins instead of listed companies. Marks are versus SOL. Cash on
+              this desk never mixes with stocks.
+            </p>
+            <p className="mt-4 max-w-[36rem] text-[16px] leading-relaxed text-muted">
+              Memecoins are high risk. Coins can go to zero. Liquidity can vanish. This is not investment advice.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="astrology" className="mx-auto w-[min(1080px,calc(100%-24px))] scroll-mt-24 py-20 md:py-24">
+        <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-teal">Astrology</p>
+        <h2 className="display mt-3 max-w-[20ch] text-[28px] text-ink md:text-[36px]">Astrology becomes a market view</h2>
+        <p className="mt-4 max-w-[40rem] text-[16px] leading-relaxed text-muted">
+          Write an astrology chart in Vedic or Western. SuperView reads the chart, writes a market prediction, then sizes a
+          basket on the Stocks or Memes desk you picked.
+        </p>
+        <div className="mt-8">
+          <MotionStage
+            component={AstrologyView}
+            still={<AstrologyViewStill />}
+            durationInFrames={ASTRO_DURATION}
+            fps={ASTRO_FPS}
+            width={ASTRO_WIDTH}
+            height={ASTRO_HEIGHT}
+            label="An astrology chart becoming a market prediction and a basket"
+          />
+        </div>
+      </section>
+
       <section id="score" className="mx-auto w-[min(1080px,calc(100%-24px))] scroll-mt-24 py-20 md:py-24">
-        <h2 className="display text-[28px] text-ink md:text-[36px]">Scored against the S&P 500</h2>
+        <h2 className="display text-[28px] text-ink md:text-[36px]">Scored against the market</h2>
         <p className="mt-4 max-w-[38rem] text-[16px] leading-relaxed text-muted">
-          Every published view carries a live vs S&P mark. Follow the people whose views beat the market, or copy a view
-          into your own pocket.
+          Stock views carry a live vs S&P mark. Meme views mark versus SOL. Follow the people whose views beat the
+          benchmark, or copy a view into your own pocket.
         </p>
         <div className="mt-8">
           <MotionStage

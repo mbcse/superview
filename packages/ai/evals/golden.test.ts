@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fill, INTERPRETER_PROMPT } from "../src/prompts/index.js";
+import { fill, INTERPRETER_PROMPT, ASTROLOGY_INTERPRETER_PROMPT, MONITOR_PROMPT, astrologyCanon } from "../src/prompts/index.js";
 import { interpreterSchema } from "../src/prompts/schemas.js";
 import { genObject } from "../src/generate.js";
 import { shouldRefuseView } from "../src/view-guard.js";
@@ -29,6 +29,25 @@ describe("prompt contract", () => {
     const p = fill(INTERPRETER_PROMPT, { view: "humanoid robots in every home", date: "2026-09-30", marketContext: "" });
     expect(p).toContain("humanoid robots in every home");
     expect(p).toContain("Only refuse if the input is empty");
+    const sky = fill(ASTROLOGY_INTERPRETER_PROMPT, {
+      view: "Saturn transits the 10th",
+      headline: "",
+      date: "2026-10-07",
+      system: "VEDIC",
+      canon: astrologyCanon("VEDIC"),
+      marketContext: ""
+    });
+    expect(sky).toContain("PRIMARY SYSTEM (VEDIC)");
+    const monitor = fill(MONITOR_PROMPT, {
+      thesis: "Labor stays tight.",
+      positions: "[]",
+      evidence: "none",
+      sky: JSON.stringify({ system: "VEDIC", chart: "Saturn transits the 10th." }),
+      mandate: "Autopilot",
+      driftThreshold: "200 bps"
+    });
+    expect(monitor).toContain("Saturn transits the 10th.");
+    expect(monitor).toContain("sky read changed");
   });
 
   it("schema refuses only with flag", () => {

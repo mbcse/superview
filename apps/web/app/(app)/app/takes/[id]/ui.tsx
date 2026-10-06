@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import { useAuthedFetch } from "@/components/use-authed-fetch";
 import { Button } from "@/components/ui/button";
 import { Chip, Notice, Surface } from "@/components/ui/surface";
-import { API_ORIGIN, fmtPooled, fmtPct, fmtUsd, fmtUsdDelta, fmtVs } from "@/lib/fmt";
+import { API_ORIGIN, fmtPooled, fmtPct, fmtUsd, fmtUsdDelta, fmtVs, tick } from "@/lib/fmt";
 import { fmtVsLabel, useLiveBook } from "@/lib/live-vs";
 import { ApiError } from "@/lib/api";
 import { decisionLabel } from "@/lib/agent-copy";
@@ -20,6 +20,7 @@ import { ViewCommentsList } from "@/components/social/view-chat";
 import { AgentOrb } from "@/components/glass/agent-orb";
 import { TickValue } from "@/components/data/tick-value";
 import { FollowButton } from "@/components/social/follow-button";
+import { SkyThesis } from "@/components/social/sky-thesis";
 
 const VsChart = dynamic(() => import("@/components/charts/vs-chart").then((m) => m.VsChart), { ssr: false });
 const RANGES = ["1D", "1W", "1M", "YTD"] as const;
@@ -86,24 +87,27 @@ function SaveToCollection({
   );
 }
 
-function bare(symbol?: string | null) {
-  return String(symbol ?? "").replace(/^RH/, "").toUpperCase();
+function bare(symbol?: string | null, source?: string | null) {
+  return tick(String(symbol ?? ""), source ?? undefined);
 }
 
 function LiveHolding({
   h,
   takeId,
-  pnlUsd
+  pnlUsd,
+  chainId
 }: {
   h: any;
   takeId: string;
   pnlUsd?: number | null;
+  chainId?: number;
 }) {
-  const q = useLiveQuote(h.token?.symbol);
+  const q = useLiveQuote(h.token?.symbol, h.tokenId);
   const score = h.score ?? {};
   return (
     <HoldingRow
       symbol={h.token?.symbol ?? ""}
+      tokenId={h.tokenId}
       weightBps={h.weightBps}
       last={q?.last ?? h.last}
       chgPct={q?.chgPct ?? h.chgPct}
@@ -113,6 +117,11 @@ function LiveHolding({
       logoUrl={h.token?.logoUrl}
       takeId={takeId}
       whyInBasket={score.whyInBasket ?? h.rationale}
+      venue={h.token?.venue}
+      liquidityUsd={h.token?.liquidityUsd != null ? Number(h.token.liquidityUsd) : null}
+      launchedAt={h.token?.launchedAt}
+      noExit={Boolean((h.token?.riskFlags as { noExit?: boolean } | null)?.noExit)}
+      chainId={h.token?.chainId ?? chainId}
     />
   );
 }
@@ -179,6 +188,7 @@ export default function TakeClient({ data }: { data: any }) {
   })?.publish ?? null;
   const storedVs = val ? Number(val.indexValue) - Number(val.benchmarkIndex) : null;
   const vsHoldings = holdings.map((h: any) => ({
+    tokenId: String(h.tokenId ?? ""),
     symbol: String(h.token?.symbol ?? ""),
     weightBps: Number(h.weightBps ?? 0),
     last: contrib.find((c) => c.tokenId === h.tokenId)?.last ?? null,
@@ -191,17 +201,18 @@ export default function TakeClient({ data }: { data: any }) {
     investedUsd: myUsd
   });
   const vs = book.vs;
-  const summary = vs == null ? "No mark vs S&P 500 yet." : `${fmtVs(vs)} vs S&P 500.`;
+  const bench = take.world === "MEMES" ? "SOL" : "S&P 500";
+  const summary = vs == null ? `No mark vs ${bench} yet.` : `${fmtVs(vs)} vs ${bench}.`;
   const legPnl = new Map(book.legs.map((l) => [bare(l.symbol), l.pnlUsd]));
   const research = rev?.researchRun;
   const authorName = take.author?.displayName ?? take.author?.handle ?? "Member";
   const candidates = research?.candidates ?? [];
   const scoreBySymbol = new Map(
-    candidates.map((c: any) => [String(c.token?.symbol ?? "").replace(/^RH/, "").toUpperCase(), c.score])
+    candidates.map((c: any) => [tick(String(c.token?.symbol ?? ""), c.token?.source), c.score])
   );
   const basket = holdings.map((h: any) => ({
     ...h,
-    score: h.score ?? scoreBySymbol.get(String(h.token?.symbol ?? "").replace(/^RH/, "").toUpperCase())
+    score: h.score ?? scoreBySymbol.get(tick(String(h.token?.symbol ?? ""), h.token?.source))
   }));
 
   useEffect(() => {
@@ -297,9 +308,18 @@ export default function TakeClient({ data }: { data: any }) {
             <FollowButton authorId={take.authorId} following={following} onChange={setFollowing} />
           ) : null}
         </div>
-        <h1 className="view mt-5 text-[22px] font-medium leading-[1.3] tracking-[-0.02em] text-ink md:text-[28px]">{rev?.sentence}</h1>
-        <p className="mt-3 flex items-center gap-1.5 text-[13px] text-muted">
+        {take.lens === "SKY" ? (
+          <SkyThesis size="page" chart={rev?.astrologyChart} prediction={rev?.sentence} />
+        ) : (
+          <h1 className="view mt-5 text-[22px] font-medium leading-[1.3] tracking-[-0.02em] text-ink md:text-[28px]">{rev?.sentence}</h1>
+        )}
+        <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[13px] text-muted">
           <AgentOrb size={14} /> Agent watching
+          {take.lens === "SKY" ? (
+            <Chip>
+              Astrology{take.astrologySystem === "VEDIC" ? " · Vedic" : take.astrologySystem === "WESTERN" ? " · Western" : ""}
+            </Chip>
+          ) : null}
         </p>
         <div className="mt-6 flex flex-wrap items-end justify-between gap-6 border-y border-teal/10 py-6">
           {myUsd != null ? (
@@ -325,7 +345,7 @@ export default function TakeClient({ data }: { data: any }) {
                 <span className="absolute inset-0 animate-ping rounded-full bg-aqua/70" />
                 <span className="relative h-1.5 w-1.5 rounded-full bg-aqua" />
               </span>
-              {take.seeded ? "vs S&P 500 · live quotes, seeded history is illustrative" : "vs S&P 500 · live"}
+              {take.seeded ? `vs ${bench} · live quotes, seeded history is illustrative` : `vs ${bench} · live`}
             </p>
           </div>
           <div className="text-right">
@@ -365,7 +385,13 @@ export default function TakeClient({ data }: { data: any }) {
         </div>
       </section>
       {investOpen ? (
-        <InvestDialog takeId={take.id} sentence={rev?.sentence} onClose={() => setInvestOpen(false)} />
+        <InvestDialog
+          takeId={take.id}
+          sentence={rev?.sentence}
+          chainId={take.chainId}
+          world={take.world}
+          onClose={() => setInvestOpen(false)}
+        />
       ) : null}
       {msg ? <Notice>{msg}</Notice> : null}
       <Surface className="p-5">
@@ -383,6 +409,7 @@ export default function TakeClient({ data }: { data: any }) {
               h={h}
               takeId={take.id}
               pnlUsd={myUsd != null ? (legPnl.get(bare(h.token?.symbol)) ?? null) : null}
+              chainId={take.chainId}
             />
           ))}
         </div>

@@ -12,20 +12,25 @@ export const interpreterSchema = z.object({
   mechanism: z.string(),
   horizon: z.string(),
   confidenceInInterpretation: z.number().min(0).max(1),
-  assumptions: z.array(z.string()),
-  falsifiers: z.array(z.string()),
+  assumptions: z.array(z.string()).default([]),
+  falsifiers: z.array(z.string()).default([]),
   clarifyingQuestions: z.array(z.string()).max(6).default([]),
   angles: z.array(
     z.object({
       name: z.string(),
       ring: ringFromLlm,
-      rationale: z.string(),
-      companyKinds: z.array(z.string()),
-      searchPhrases: z.array(z.string())
+      rationale: z.string().default(""),
+      companyKinds: z.array(z.string()).default([]),
+      searchPhrases: z.array(z.string()).default([])
     })
   ).default([]),
   refuse: z.boolean().default(false),
-  refuseReason: z.string().optional()
+  refuseReason: z.string().optional(),
+  suggestWorld: z.enum(["STOCKS", "MEMES"]).optional(),
+  skyRead: z.string().optional().default(""),
+  marketPrediction: z.string().optional().default(""),
+  timeLord: z.string().optional().default(""),
+  transitFocus: z.string().optional().default("")
 });
 
 export const screenerSchema = z.object({

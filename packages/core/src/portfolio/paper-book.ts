@@ -5,29 +5,33 @@ import { canonicalReceipt } from "../takes/receipt.js";
 import { computePocketMark } from "./tick.js";
 import { latestPrice } from "../market/prices.js";
 import { planRebalanceTrades } from "./rebalance.js";
-import { quoteWithinOracle } from "../execution/checks.js";
+import { oracleBand, quoteWithinOracle } from "../execution/checks.js";
+import { cashTokenId, displaySymbol, MEME_MAX_POOL_SHARE, MEME_STALE_MS, type World } from "@takeandstake/shared";
+
+function paperCashId(take?: { world?: World; chainId?: number } | null) {
+  return take ? cashTokenId(take.world ?? "STOCKS", take.chainId ?? 4663) : "USDG";
+}
 
 export type PaperEnv = {
   ZEROX_API_KEY?: string;
   ORACLE_MAX_DEVIATION?: number;
 };
 
-const TOKEN_DECIMALS = 18;
 const USDG_DECIMALS = 6;
 
 function isHexAddress(addr: string) {
   return /^0x[0-9a-fA-F]{40}$/.test(addr);
 }
 
-function paperBuyAmount(sellMicroUsd: bigint, priceUsd: number): string {
+function paperBuyAmount(sellMicroUsd: bigint, priceUsd: number, decimals: number): string {
   const usd = Number(sellMicroUsd) / 10 ** USDG_DECIMALS;
-  const qty = usd / Math.max(priceUsd, 0.01);
-  return BigInt(Math.floor(qty * 10 ** TOKEN_DECIMALS)).toString();
+  const qty = usd / Math.max(priceUsd, 1e-12);
+  return BigInt(Math.floor(qty * 10 ** decimals)).toString();
 }
 
-function paperSellAmount(usd: number, priceUsd: number): bigint {
-  const qty = usd / Math.max(priceUsd, 0.01);
-  return BigInt(Math.floor(qty * 10 ** TOKEN_DECIMALS));
+function paperSellAmount(usd: number, priceUsd: number, decimals: number): bigint {
+  const qty = usd / Math.max(priceUsd, 1e-12);
+  return BigInt(Math.floor(qty * 10 ** decimals));
 }
 
 export type WeightTarget = { tokenId: string; weightBps: number; rationale?: string };
@@ -67,13 +71,15 @@ export function prepareSellFill(opts: {
   haveUsd: number;
   haveQty: number;
   implied: number;
+  decimals?: number;
 }) {
-  const price = Math.max(opts.implied, 0.01);
+  const decimals = opts.decimals ?? 18;
+  const price = Math.max(opts.implied, 1e-12);
   const usdCap = Math.min(Math.max(0, opts.requestedUsd), Math.max(0, opts.haveUsd));
-  const requestedUnits = paperSellAmount(usdCap, price);
-  const haveUnits = BigInt(Math.floor(Math.max(0, opts.haveQty) * 10 ** TOKEN_DECIMALS));
+  const requestedUnits = paperSellAmount(usdCap, price, decimals);
+  const haveUnits = BigInt(Math.floor(Math.max(0, opts.haveQty) * 10 ** decimals));
   const tokenAmount = requestedUnits > haveUnits ? haveUnits : requestedUnits;
-  const usd = (Number(tokenAmount) / 10 ** TOKEN_DECIMALS) * price;
+  const usd = (Number(tokenAmount) / 10 ** decimals) * price;
   const cashAmount = BigInt(Math.round(usd * 10 ** USDG_DECIMALS));
   return { tokenAmount, cashAmount, usd };
 }
@@ -94,20 +100,68 @@ function orderAmounts(fill: PreparedFill) {
   return { sellAmount: fill.tokenAmount.toString(), buyAmount: fill.cashAmount.toString() };
 }
 
-async function priceForToken(tokenId: string, env: PaperEnv, sellMicroUsd: bigint, contractAddress: string) {
+async function priceForToken(
+  tokenId: string,
+  env: PaperEnv,
+  sellMicroUsd: bigint,
+  contractAddress: string,
+  decimals = 18,
+  tokenMeta?: { venue?: string | null; source?: string | null; world?: World | null }
+) {
   const snap = await latestPrice(tokenId);
   const rhAsk = snap ? Number(snap.ask ?? snap.price) : null;
   const chainlink = await prisma.priceSnapshot.findFirst({
-    where: { tokenId, source: "CHAINLINK" },
+    where: { tokenId, source: { in: ["CHAINLINK", "JUPITER", "XSTOCKS", "DEXSCREENER", "BAGS", "PUMPFUN"] } },
     orderBy: { observedAt: "desc" }
   });
   const oracle = chainlink ? Number(chainlink.price) : rhAsk;
-  if (rhAsk == null && oracle == null) return { skip: "no_price" as const };
+  if (rhAsk == null && oracle == null && isHexAddress(contractAddress)) return { skip: "no_price" as const };
 
   let implied = rhAsk ?? oracle ?? 0;
-  let buyAmount = paperBuyAmount(sellMicroUsd, implied);
-  let quoteJson: object = { mode: "paper_rh_ask", priceUsd: implied };
-  const maxDev = env.ORACLE_MAX_DEVIATION ?? 0.015;
+  if (!(implied > 0) && !isHexAddress(contractAddress)) {
+    try {
+      const { bagsTradeQuote, jupiterSwapQuote, pumpCurveQuotes, jupiterPrices } = await import("@takeandstake/markets");
+      const usd = Number(sellMicroUsd) / 1e6;
+      const asset = {
+        id: tokenId,
+        symbol: tokenId,
+        chainId: 101,
+        contractAddress,
+        decimals,
+        venue: tokenMeta?.venue as never,
+        source: tokenMeta?.source as never,
+        world: tokenMeta?.world ?? undefined
+      };
+      if (tokenMeta?.venue === "BAGS_CURVE") {
+        const swap = await bagsTradeQuote({ asset, side: "BUY", amountUsd: usd, owner: "" });
+        if (swap) {
+          implied = usd / (Number(swap.outAmount) / 10 ** decimals);
+          if (swap.priceImpact > 0.05) return { skip: "impact" as const };
+        }
+      } else if (tokenMeta?.venue === "PUMP_CURVE") {
+        const sol = await jupiterPrices(["So11111111111111111111111111111111111111112"]);
+        const solUsd = sol.get("So11111111111111111111111111111111111111112")?.last ?? 0;
+        const curves = solUsd > 0 ? await pumpCurveQuotes([{ mint: contractAddress }], solUsd) : new Map();
+        const q = curves.get(contractAddress);
+        if (q) implied = q.last;
+      } else {
+        const swap = await jupiterSwapQuote({ asset, side: "BUY", amountUsd: usd, owner: "" });
+        if (swap) {
+          implied = usd / (Number(swap.outAmount) / 10 ** decimals);
+          if (swap.priceImpact > 0.05) return { skip: "impact" as const };
+        }
+      }
+    } catch {
+      /* keep mark */
+    }
+  }
+  if (!(implied > 0)) return { skip: "no_price" as const };
+  if (tokenMeta?.world === "MEMES" && chainlink && Date.now() - chainlink.observedAt.getTime() > MEME_STALE_MS) {
+    return { skip: "stale" as const };
+  }
+  let buyAmount = paperBuyAmount(sellMicroUsd, implied, decimals);
+  let quoteJson: object = { mode: "paper_mark", priceUsd: implied };
+  const maxDev = env.ORACLE_MAX_DEVIATION ?? oracleBand(tokenMeta?.world, tokenMeta?.source);
 
   if (env.ZEROX_API_KEY && isHexAddress(contractAddress) && sellMicroUsd > 0n) {
     try {
@@ -119,7 +173,7 @@ async function priceForToken(tokenId: string, env: PaperEnv, sellMicroUsd: bigin
         sellAmount: sellMicroUsd.toString(),
         firm: false
       });
-      implied = quoteUsdPerToken(quote, 6, 18);
+      implied = quoteUsdPerToken(quote, 6, decimals);
       if (oracle != null && !quoteWithinOracle(implied, oracle, maxDev)) {
         return { skip: "oracle_offside" as const };
       }
@@ -127,8 +181,8 @@ async function priceForToken(tokenId: string, env: PaperEnv, sellMicroUsd: bigin
       quoteJson = quote as object;
     } catch {
       implied = rhAsk ?? oracle ?? 0;
-      buyAmount = paperBuyAmount(sellMicroUsd, implied);
-      quoteJson = { mode: "paper_rh_ask", priceUsd: implied };
+      buyAmount = paperBuyAmount(sellMicroUsd, implied, decimals);
+      quoteJson = { mode: "paper_mark", priceUsd: implied };
     }
   }
   return { implied, buyAmount, quoteJson };
@@ -225,10 +279,12 @@ export async function depositPaperUsd(pocketId: string, usd: number) {
   if (amountUsd == null) return { error: "bad_amount" as const };
   try {
     return await withPocketLock(pocketId, async (tx) => {
+      const pocket = await tx.pocket.findUnique({ where: { id: pocketId }, include: { take: true } });
+      const cashId = paperCashId(pocket?.take);
       const cash = await tx.ledgerAccount.upsert({
-        where: { pocketId_kind_tokenId: { pocketId, kind: "CASH", tokenId: "USDG" } },
+        where: { pocketId_kind_tokenId: { pocketId, kind: "CASH", tokenId: cashId } },
         update: {},
-        create: { pocketId, kind: "CASH", tokenId: "USDG" }
+        create: { pocketId, kind: "CASH", tokenId: cashId }
       });
       const amount = String(Math.round(amountUsd * 1_000_000));
       const ledgerTx = await tx.ledgerTransaction.create({
@@ -254,7 +310,9 @@ export async function withdrawPaperUsd(pocketId: string, usd: number) {
   if (amountUsd == null) return { error: "bad_amount" as const };
   try {
     return await withPocketLock(pocketId, async (tx) => {
-      const cash = await tx.ledgerAccount.findFirst({ where: { pocketId, kind: "CASH", tokenId: "USDG" } });
+      const pocket = await tx.pocket.findUnique({ where: { id: pocketId }, include: { take: true } });
+      const cashId = paperCashId(pocket?.take);
+      const cash = await tx.ledgerAccount.findFirst({ where: { pocketId, kind: "CASH", tokenId: cashId } });
       if (!cash) return { error: "no_paper_usdg" as const };
       const entries = await tx.ledgerEntry.findMany({ where: { accountId: cash.id } });
       const cashUnits = cashUnitsFromEntries(entries);
@@ -322,6 +380,20 @@ export async function runDryRunInvest(pocketId: string, env: PaperEnv) {
           });
           continue;
         }
+        if ((h.token.riskFlags as { noExit?: boolean } | null)?.noExit) {
+          prepared.push({
+            tokenId: h.tokenId,
+            symbol: h.token.symbol,
+            side: "BUY",
+            cashAmount,
+            tokenAmount: 0n,
+            usd: Number(cashAmount) / 1e6,
+            implied: 0,
+            quoteJson: {},
+            skip: "no_exit"
+          });
+          continue;
+        }
         if (h.token.isTradingHalt) {
           prepared.push({
             tokenId: h.tokenId,
@@ -336,7 +408,27 @@ export async function runDryRunInvest(pocketId: string, env: PaperEnv) {
           });
           continue;
         }
-        const priced = await priceForToken(h.tokenId, env, cashAmount, h.token.contractAddress);
+        let spend = cashAmount;
+        const liq = Number(h.token.liquidityUsd ?? 0);
+        if (h.token.world === "MEMES" && liq > 0) {
+          const cap = BigInt(Math.floor(liq * MEME_MAX_POOL_SHARE * 1e6));
+          if (spend > cap) spend = cap;
+          if (spend < 5_000_000n) {
+            prepared.push({
+              tokenId: h.tokenId,
+              symbol: h.token.symbol,
+              side: "BUY",
+              cashAmount,
+              tokenAmount: 0n,
+              usd: Number(cashAmount) / 1e6,
+              implied: 0,
+              quoteJson: {},
+              skip: "pool_share"
+            });
+            continue;
+          }
+        }
+        const priced = await priceForToken(h.tokenId, env, spend, h.token.contractAddress, h.token.decimals, h.token);
         if ("skip" in priced && priced.skip) {
           prepared.push({
             tokenId: h.tokenId,
@@ -355,9 +447,9 @@ export async function runDryRunInvest(pocketId: string, env: PaperEnv) {
           tokenId: h.tokenId,
           symbol: h.token.symbol,
           side: "BUY",
-          cashAmount,
+          cashAmount: spend,
           tokenAmount: BigInt(priced.buyAmount ?? "0"),
-          usd: Number(cashAmount) / 1e6,
+          usd: Number(spend) / 1e6,
           implied: priced.implied!,
           quoteJson: priced.quoteJson!
         });
@@ -386,6 +478,10 @@ export async function materializeTarget(opts: {
   changeSummary: string;
 }) {
   const last = await prisma.takeRevision.count({ where: { takeId: opts.takeId } });
+  const priorRev = await prisma.takeRevision.findFirst({
+    where: { takeId: opts.takeId },
+    orderBy: { number: "desc" }
+  });
   const target = await prisma.portfolioTarget.create({
     data: {
       cashBps: opts.cashBps,
@@ -413,6 +509,7 @@ export async function materializeTarget(opts: {
       takeId: opts.takeId,
       number: last + 1,
       sentence: opts.sentence,
+      astrologyChart: priorRev?.astrologyChart,
       origin: "AGENT",
       targetId: target.id,
       changeSummary: opts.changeSummary,
@@ -471,9 +568,9 @@ export async function executePaperRebalance(
     opts?.skipUsd ?? 5
   );
   const cash = await tx.ledgerAccount.upsert({
-    where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "CASH", tokenId: "USDG" } },
+    where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "CASH", tokenId: paperCashId(pocket.take) } },
     update: {},
-    create: { pocketId: pocket.id, kind: "CASH", tokenId: "USDG" }
+    create: { pocketId: pocket.id, kind: "CASH", tokenId: paperCashId(pocket.take) }
   });
   const order = await tx.order.create({
     data: { pocketId: pocket.id, mode: "DRY_RUN", kind: "REBALANCE", status: "SUBMITTING" }
@@ -501,7 +598,7 @@ export async function executePaperRebalance(
       continue;
     }
     const sellMicro = BigInt(Math.round(trade.usd * 1e6));
-    const priced = await priceForToken(token.id, env, trade.side === "BUY" ? sellMicro : 0n, token.contractAddress);
+    const priced = await priceForToken(token.id, env, trade.side === "BUY" ? sellMicro : 0n, token.contractAddress, token.decimals, token);
     if ("skip" in priced && priced.skip) {
       prepared.push({
         tokenId: token.id,
@@ -523,7 +620,8 @@ export async function executePaperRebalance(
         requestedUsd: trade.usd,
         haveUsd: have?.mtm ?? 0,
         haveQty: have?.qty ?? 0,
-        implied
+        implied,
+        decimals: token.decimals
       });
       prepared.push({
         tokenId: token.id,
@@ -541,7 +639,7 @@ export async function executePaperRebalance(
         symbol: token.symbol,
         side: "BUY",
         cashAmount: sellMicro,
-        tokenAmount: BigInt(priced.buyAmount ?? paperBuyAmount(sellMicro, implied)),
+        tokenAmount: BigInt(priced.buyAmount ?? paperBuyAmount(sellMicro, implied, token.decimals)),
         usd: trade.usd,
         implied,
         quoteJson: priced.quoteJson ?? { mode: "paper_rh_ask", priceUsd: implied }
@@ -581,7 +679,7 @@ export function weightsFromTrimAdd(
   symbol: string,
   addTokenId?: string
 ): { weights: WeightTarget[]; cashBps: number } {
-  const needle = symbol.replace(/^RH/i, "").toUpperCase();
+  const needle = displaySymbol(symbol).toUpperCase();
   const next = holdings.map((h) => ({
     tokenId: h.tokenId,
     weightBps: h.weightBps,
@@ -589,7 +687,7 @@ export function weightsFromTrimAdd(
   }));
   let cash = cashBps;
   if (intent === "trim") {
-    const hit = holdings.find((h) => h.token.symbol.replace(/^RH/i, "").toUpperCase() === needle);
+    const hit = holdings.find((h) => displaySymbol(h.token.symbol).toUpperCase() === needle);
     if (!hit) return { weights: next, cashBps: cash };
     const cut = Math.max(100, Math.round(hit.weightBps * 0.2));
     const row = next.find((n) => n.tokenId === hit.tokenId)!;

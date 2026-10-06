@@ -1,4 +1,5 @@
 import { prisma } from "@takeandstake/db";
+import { displaySymbol } from "@takeandstake/shared";
 import { genObject } from "./generate.js";
 import { socialModel } from "./llm.js";
 import { pocketInstructSchema } from "./prompts/schemas.js";
@@ -20,7 +21,7 @@ export async function instructPocket(pocketId: string, message: string) {
     }
   });
   if (!pocket) throw new Error("pocket_not_found");
-  const names = (pocket.take.revisions[0]?.target?.holdings ?? []).map((h) => h.token.symbol.replace(/^RH/, "")).join(", ");
+  const names = (pocket.take.revisions[0]?.target?.holdings ?? []).map((h) => displaySymbol(h.token.symbol, h.token.source)).join(", ");
   const mandate = pocket.mandate?.mode === "APPROVAL" ? "Ask me first" : "Autopilot";
   try {
     return await genObject({

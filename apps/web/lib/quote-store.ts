@@ -1,10 +1,13 @@
 export type LiveQuote = {
+  tokenId?: string;
   symbol: string;
   last: number;
   tokenLast?: number | null;
   bid: number | null;
   ask: number | null;
   halt: boolean;
+  stale?: boolean;
+  asOf?: string | null;
   chgPct?: number | null;
   dir?: "up" | "down" | null;
   seq?: number;
@@ -36,8 +39,9 @@ const wantedListeners = new Set<Listener>();
 
 function keysFor(symbol: string) {
   const u = symbol.toUpperCase();
-  const bare = u.replace(/^RH/, "");
-  return [...new Set([u, bare, bare ? `RH${bare}` : ""].filter(Boolean))];
+  if (u.length > 20) return [u];
+  const bare = u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
+  return [...new Set([u, bare, `RH${bare}`].filter(Boolean))];
 }
 
 function notify(keys: string[]) {
@@ -60,11 +64,16 @@ export function onWanted(fn: Listener) {
   return () => wantedListeners.delete(fn);
 }
 
-export function getQuote(symbol?: string | null): LiveQuote | null {
+export function getQuote(symbol?: string | null, tokenId?: string | null): LiveQuote | null {
+  if (tokenId) {
+    const hit = snapshot[tokenId] ?? snapshot[tokenId.toUpperCase()];
+    if (hit) return hit;
+  }
   if (!symbol) return null;
   const u = symbol.toUpperCase();
-  const bare = u.replace(/^RH/, "");
-  return snapshot[u] ?? snapshot[`RH${bare}`] ?? snapshot[bare] ?? null;
+  if (u.length > 20) return snapshot[u] ?? snapshot[symbol] ?? null;
+  const bare = u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
+  return snapshot[u] ?? snapshot[`RH${bare}`] ?? snapshot[bare] ?? snapshot[tokenId ?? ""] ?? null;
 }
 
 export function getQuoteBook() {
@@ -97,13 +106,16 @@ export function applyQuotes(list: LiveQuote[]) {
   const dirty = new Set<string>();
   for (const raw of list) {
     const u = raw.symbol.toUpperCase();
-    const bare = u.replace(/^RH/, "");
-    const merged = mergeQuote(snapshot[u] ?? snapshot[bare], { ...raw, symbol: u });
+    const id = raw.tokenId?.toUpperCase();
+    const bare = u.length > 20 ? "" : u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
+    const merged = mergeQuote(snapshot[id ?? ""] ?? snapshot[u] ?? snapshot[bare], { ...raw, symbol: u });
     if (!merged.changed) continue;
     if (!next) next = { ...snapshot };
     next[u] = merged.quote;
+    if (id) next[id] = merged.quote;
     if (bare) next[bare] = { ...merged.quote, symbol: bare };
     dirty.add(u);
+    if (id) dirty.add(id);
     if (bare) dirty.add(bare);
   }
   if (!next) return;

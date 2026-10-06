@@ -3,7 +3,7 @@ import { constructPortfolio, exposureScore } from "./portfolio/optimizer.js";
 import { applyFill, assertDoubleEntry, timeWeightedReturn } from "./portfolio/ledger.js";
 import { applyGuardrails } from "./agent/guardrails.js";
 import { canonicalReceipt, verifyReceipt } from "./takes/receipt.js";
-import { classifyRegime, quoteWithinOracle } from "./execution/checks.js";
+import { classifyRegime, oracleBand, quoteWithinOracle } from "./execution/checks.js";
 import { weightedBookIndex } from "./portfolio/mark.js";
 
 describe("optimizer", () => {
@@ -90,6 +90,29 @@ describe("ledger", () => {
   });
 });
 
+describe("desk paper rules", () => {
+  it("caps meme names at 25 percent", () => {
+    const r = applyGuardrails(
+      {
+        cashBps: 500,
+        holdings: []
+      },
+      [{ tokenId: "m1", weightBps: 4000 }],
+      {
+        maxTurnoverDailyBps: 10_000,
+        maxTurnoverWeeklyBps: 10_000,
+        allowNewNames: true,
+        maxNewNamesPerWeek: 8,
+        cashMinBps: 0,
+        cashMaxBps: 2000,
+        skipTradeUsd: 5
+      },
+      { world: "MEMES" }
+    );
+    expect(r.weights.every((w) => w.weightBps <= 2500)).toBe(true);
+  });
+});
+
 describe("guardrails", () => {
   it("blocks stale prices", () => {
     const r = applyGuardrails(
@@ -160,6 +183,39 @@ describe("mark", () => {
   });
 });
 
+describe("meme constructor", () => {
+  it("allows a 3-name meme basket under a 25% name cap", () => {
+    const result = constructPortfolio(
+      Array.from({ length: 3 }).map((_, i) => ({
+        tokenId: `m${i}`,
+        symbol: `M${i}`,
+        actionId: `meme${i}`,
+        exposure: 0.8,
+        confidence: 0.8
+      })),
+      500,
+      { world: "MEMES" }
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.holdings.length).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...result.holdings.map((h) => h.weightBps))).toBeLessThanOrEqual(2500);
+  });
+
+  it("equal-weights a thin meme desk instead of failing", () => {
+    const result = constructPortfolio(
+      [{ tokenId: "m1", symbol: "DOG", actionId: "meme", exposure: 0.8, confidence: 0.8 }],
+      500,
+      { world: "MEMES" }
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.holdings).toHaveLength(1);
+    expect(result.holdings[0]?.weightBps).toBeLessThanOrEqual(2500);
+    expect(result.holdings[0]!.weightBps + result.cashBps).toBe(10_000);
+  });
+});
+
 describe("market", () => {
   it("labels risk-off", () => {
     expect(classifyRegime({ spxVs50d: -0.05, vix: 28, vixChange: 4, breadth: 0.2 })).toBe("RISK_OFF");
@@ -167,5 +223,7 @@ describe("market", () => {
   it("rejects far quotes", () => {
     expect(quoteWithinOracle(110, 100, 0.02)).toBe(false);
     expect(quoteWithinOracle(101, 100, 0.02)).toBe(true);
+    expect(oracleBand("MEMES")).toBe(0.04);
+    expect(oracleBand("STOCKS", "XSTOCKS", true)).toBe(0.015);
   });
 });

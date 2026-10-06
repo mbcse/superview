@@ -19,15 +19,51 @@ enum TokenStatus {
   HALTED
 }
 
+enum World {
+  STOCKS
+  MEMES
+}
+
+enum AssetSource {
+  ROBINHOOD
+  XSTOCKS
+  BAGS
+  PUMPFUN
+  OTHER
+}
+
+enum Venue {
+  RH_BOOK
+  BAGS_CURVE
+  PUMP_CURVE
+  PUMPSWAP
+  AMM
+}
+
 enum PriceSource {
   CHAINLINK
   RH_REST
+  XSTOCKS
+  JUPITER
+  BAGS
+  PUMPFUN
+  DEXSCREENER
 }
 
 enum TakeStatus {
   DRAFT
   PUBLISHED
   ARCHIVED
+}
+
+enum TakeLens {
+  BELIEF
+  SKY
+}
+
+enum AstrologySystem {
+  VEDIC
+  WESTERN
 }
 
 enum Visibility {
@@ -240,6 +276,7 @@ model User {
   jurisdictionStatus      JurisdictionStatus  @default(UNKNOWN)
   attestedNotRestrictedAt DateTime?
   liveUnlockedAt          DateTime?
+  memesRiskAckAt          DateTime?
   createdAt               DateTime            @default(now())
   wallets                 Wallet[]
   takes                   Take[]
@@ -305,6 +342,18 @@ model StockToken {
   name                 String
   contractAddress      String
   chainId              Int              @default(4663)
+  world                World            @default(STOCKS)
+  source               AssetSource      @default(ROBINHOOD)
+  venue                Venue            @default(RH_BOOK)
+  decimals             Int              @default(18)
+  tokenProgram         String?
+  xstocksSymbol        String?
+  liquidityUsd         Decimal?         @db.Decimal(38, 2)
+  holderCount          Int?
+  riskFlags            Json?
+  riskScore            Decimal?         @db.Decimal(6, 4)
+  launchedAt           DateTime?
+  graduatedAt          DateTime?
   rhjId                String?
   isin                 String?
   feedAddress          String?
@@ -324,7 +373,9 @@ model StockToken {
   holdings             TargetHolding[]
   candidates           CandidateCompany[]
 
-  @@unique([symbol, chainId])
+  @@unique([chainId, contractAddress])
+  @@index([world, symbol])
+  @@index([symbol, chainId])
   @@index([contractAddress])
 }
 
@@ -396,6 +447,8 @@ model ResearchRun {
   takeId            String?
   take              Take?            @relation(fields: [takeId], references: [id])
   takeRevisionId    String?
+  world             World            @default(STOCKS)
+  chainId           Int              @default(4663)
   status            ResearchStatus   @default(PENDING)
   stage             String           @default("queued")
   catalogSnapshotId String?
@@ -542,6 +595,10 @@ model Take {
   author            User              @relation(fields: [authorId], references: [id])
   circleId          String?
   circle            Circle?           @relation(fields: [circleId], references: [id])
+  world             World             @default(STOCKS)
+  chainId           Int               @default(4663)
+  lens              TakeLens          @default(BELIEF)
+  astrologySystem   AstrologySystem?
   status            TakeStatus        @default(DRAFT)
   visibility        Visibility        @default(PUBLIC)
   currentRevisionId String?
@@ -564,6 +621,9 @@ model Take {
   collectionItems   CollectionItem[]
   decisions         AgentDecision[]
   researchRuns      ResearchRun[]
+
+  @@index([world, status, visibility, createdAt])
+  @@index([world, chainId])
 }
 
 model TakeRevision {
@@ -572,6 +632,7 @@ model TakeRevision {
   take           Take             @relation(fields: [takeId], references: [id])
   number         Int
   sentence       String
+  astrologyChart String?
   horizon        String?
   falsifier      String?
   researchRunId  String?
@@ -689,13 +750,14 @@ model LedgerEntry {
 }
 
 model Valuation {
-  id              String   @id @default(cuid())
-  pocketId        String
-  pocket          Pocket   @relation(fields: [pocketId], references: [id])
-  asOf            DateTime
-  navUsd          Decimal  @db.Decimal(38, 18)
-  benchmarkNavUsd Decimal  @db.Decimal(38, 18)
-  pricesRef       Json?
+  id                String   @id @default(cuid())
+  pocketId          String
+  pocket            Pocket   @relation(fields: [pocketId], references: [id])
+  asOf              DateTime
+  navUsd            Decimal  @db.Decimal(38, 18)
+  benchmarkNavUsd   Decimal  @db.Decimal(38, 18)
+  benchmarkAssetId  String?
+  pricesRef         Json?
 }
 
 model RebalanceProposal {
@@ -1082,6 +1144,7 @@ model TakeValuation {
   asOf                 DateTime
   indexValue           Decimal      @db.Decimal(38, 18)
   benchmarkIndex       Decimal      @db.Decimal(38, 18)
+  benchmarkAssetId     String?
   holdingContributions Json?
   isDaily              Boolean      @default(false)
 

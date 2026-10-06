@@ -37,7 +37,7 @@ export function TokenMarket() {
       />
       <div style={{ padding: "22px 26px 0" }}>
         <div style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.03em", lineHeight: 1.15 }}>
-          Stock tokens on Robinhood Chain
+          Stock tokens on multiple chains
         </div>
         <div
           style={{
@@ -161,7 +161,7 @@ export function TokenMarketStill() {
         padding: "24px 26px"
       }}
     >
-      <p style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.03em" }}>Stock tokens on Robinhood Chain</p>
+      <p style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.03em" }}>Stock tokens on multiple chains</p>
       <p style={{ marginTop: 8, fontSize: 13, color: C.muted, fontFamily: GEIST }}>
         Economic exposure to listed companies. Not share ownership.
       </p>

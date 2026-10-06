@@ -7,10 +7,14 @@ export default async function PublicTakePage({ params }: { params: Promise<{ id:
   try {
     const data: {
       take: {
+        chainId?: number;
+        lens?: string;
+        astrologySystem?: string | null;
         author?: { handle?: string };
         revisions?: Array<{
           sentence?: string;
-          target?: { holdings?: Array<{ id?: string; token?: { symbol?: string; logoUrl?: string | null }; weightBps: number; rationale?: string; role?: string }> };
+          astrologyChart?: string | null;
+          target?: { holdings?: Array<{ id?: string; token?: { symbol?: string; logoUrl?: string | null; chainId?: number }; weightBps: number; rationale?: string; role?: string }> };
         }>;
         valuations?: Array<{ indexValue: unknown; benchmarkIndex: unknown }>;
       };
@@ -31,9 +35,13 @@ export default async function PublicTakePage({ params }: { params: Promise<{ id:
         takeId={id}
         handle={data.take.author?.handle ?? ""}
         sentence={rev?.sentence ?? "Untitled view"}
+        chart={data.take.lens === "SKY" ? rev?.astrologyChart ?? null : null}
+        lens={data.take.lens}
+        astrologySystem={data.take.astrologySystem}
         vs={vs}
         agentLine={agentLine}
         holdings={holdings}
+        chainId={data.take.chainId}
       />
     );
   } catch {

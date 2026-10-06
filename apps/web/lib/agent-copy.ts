@@ -11,7 +11,7 @@ export function proposalLine(trades: unknown): string {
   const bits = rows
     .map((t) => {
       const action = String(t.action ?? t.side ?? "");
-      const symbol = String(t.symbol ?? "").replace(/^RH/, "");
+      const symbol = String(t.symbol ?? "");
       if (!symbol || action === "keep") return null;
       return `${action} ${symbol}`.trim();
     })
