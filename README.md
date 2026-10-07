@@ -87,7 +87,7 @@ The view page is not only a vs S&P headline.
 - **Each name** shows last, today’s percent, and the dollar P&L on your slice of the basket.
 - **Portfolio** shows the same mark at pocket level: value, dollar P&L, percent of cost, vs S&P, and per-name dollars.
 
-Quotes come from Robinhood’s price feed every second, into Redis, then to the app over poll plus server-sent events. Day change is versus the prior cash session close. Weekends use Friday versus Thursday, not a flat zero. Wide after-hours books are clamped to the cash-session range so a stale bid/ask does not invent P&L.
+Quotes come from Robinhood’s price feed every second, land in a live cache, and reach the app over a real-time stream. Day change is versus the prior cash session close. Weekends use Friday versus Thursday, not a flat zero. Wide after-hours books are clamped to the cash-session range so a stale bid/ask does not invent P&L.
 
 ---
 
@@ -104,40 +104,38 @@ SuperView is not a broker and does not give investment advice.
 ## Architecture
 
 ```
-┌────────────┐     REST + SSE      ┌────────────┐     BullMQ      ┌────────────┐
-│  Next.js   │ ──────────────────► │  Express   │ ──────────────► │   Worker   │
-│  :3000     │   quotes / stream   │  :4000     │                 │  research  │
-│  Vercel    │ ◄──── EventSource ─ │  Railway   │ ◄── Redis ───── │  quotes 1s │
-└────────────┘                     └─────┬──────┘                 │  mark/book │
-                                         │                        └─────┬──────┘
-                                         ▼                              ▼
-                                   Postgres + Prisma              RH REST / RPCs
-                                   (JSON embeddings,              Chainlink, 0x
-                                    cosine, not pgvector)
+┌────────────┐     API + stream     ┌────────────┐     Queue      ┌────────────┐
+│  Web app   │ ───────────────────► │    API     │ ─────────────► │   Worker   │
+│            │   quotes / research  │            │                │  research  │
+│            │ ◄──── live feed ──── │            │ ◄── cache ──── │  quotes    │
+└────────────┘                      └─────┬──────┘                │  marks     │
+                                          │                       └─────┬──────┘
+                                          ▼                             ▼
+                                    Database                      Market data
+                                    (search, books, ledger)       oracles, execution
 ```
-
-pnpm and Turborepo.
 
 | Piece | Role |
 | --- | --- |
-| **Web** | Next.js 15 and React 19. Feed, compose, view, portfolio, marketing. Hosted on Vercel. |
-| **API** | Express. Privy auth, research jobs, social graph, execution, `/v1/stream/prices`. |
-| **Worker** | Catalog, 1s quotes, marks, research pipeline, daily monitor. |
-| **Core** | Basket construction, vs S&P series, ledger, take access. |
-| **AI** | Committee prompts, web research, view guard. |
-| **Chain** | Robinhood and chainlist RPC pool, 0x, oracles, Privy signing. |
-| **DB** | Postgres and Prisma. JSON embeddings with cosine similarity, not pgvector. |
+| **Web** | Product surface: feed, compose, view, portfolio, marketing. |
+| **API** | Auth, research jobs, social graph, execution, live price stream. |
+| **Worker** | Catalog, second-by-second quotes, marks, research pipeline, daily monitor. |
+| **Queue** | Durable jobs for research, construction, and agent follow-up. |
+| **Cache** | Live last prices and day change for the stream. |
+| **Core** | Basket construction, vs S&P series, ledger, view access. |
+| **AI** | Committee research, web diligence, view guard. |
+| **Chain** | Market connectivity, oracles, and signed execution. |
+| **Database** | Books, social graph, fills, and similarity search. |
 
 ```
 apps/web          SuperView UI
-apps/api          REST + SSE
+apps/api          API + live stream
 apps/worker       quotes, research, agent, catalog
 packages/core     books, series, fills, access
 packages/ai       committee + monitor
-packages/db       Prisma + seed
-packages/chain    RH / 0x / oracles / Privy
+packages/db       schema + seed
+packages/chain    markets, oracles, signing
 packages/config   env
-deploy/railway    Hobby Docker (API + worker)
 ```
 
 Typeface: Saans display, Geist body.
@@ -149,7 +147,7 @@ Typeface: Saans display, Geist body.
 ```bash
 pnpm install
 cp .env.example .env
-docker compose up -d          # Postgres + Redis
+docker compose up -d          # database and queue
 pnpm db:generate && pnpm db:migrate && pnpm db:seed
 pnpm dev
 ```
@@ -163,46 +161,6 @@ pnpm dev
 pnpm spike    # 0x quote, Chainlink NVDA, Privy swap. Missing keys skip.
 pnpm test
 ```
-
----
-
-## Production shape
-
-| Host | Service |
-| --- | --- |
-| **Vercel** | `apps/web` |
-| **Railway (Hobby)** | Postgres + Redis + one Docker box (`deploy/railway/hobby.toml`) running API + worker |
-
-Use **Docker**, not Railpack (repo root looks like Next.js). Leave Railway **Root Directory** empty. Dockerfile: `deploy/railway/Dockerfile`.
-
-**Vercel**
-
-```
-NEXT_PUBLIC_API_ORIGIN=https://api.yourdomain.com
-NEXT_PUBLIC_PRIVY_APP_ID=
-NEXT_PUBLIC_POSTHOG_KEY=phc_5918n4s3UPJOIawjTciuy5YrGdotlvB1dTpoZFPTdkM
-NEXT_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
-```
-
-**Railway**
-
-```
-NODE_ENV=production
-APP_MODE=paper
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_URL=${{Redis.REDIS_URL}}
-WEB_ORIGIN=https://your-app.vercel.app
-API_ORIGIN=https://api.yourdomain.com
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-PRIVY_APP_ID=
-PRIVY_APP_SECRET=
-ADMIN_TOKEN=
-```
-
-`API_ORIGIN` must be a real `https://...` URL (not `https://` with an empty host). Railway `PORT` is injected. Do not publish `:4000` on a custom domain. Seed once against the Railway database: `DATABASE_URL=... pnpm db:seed`.
-
-Hobby is usage-billed and this worker ticks quotes every second, so expect to spend past the included credit.
 
 ---
 

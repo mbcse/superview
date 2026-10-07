@@ -1,0 +1,255 @@
+/* Problem slide — one composition: copy+cards left, ? right */
+
+/*
+ * translateX(0) still creates a stacking context and traps mix-blend-mode.
+ * Settled active state must be transform: none.
+ */
+.slide.investor-survey.active {
+    transform: none;
+}
+
+.investor-survey {
+    justify-content: center !important;
+    align-items: stretch !important;
+    text-align: left !important;
+    overflow: hidden;
+    padding-top: clamp(1.5rem, 3vh, 2.5rem) !important;
+    padding-bottom: clamp(1.5rem, 3vh, 2.5rem) !important;
+}
+
+.investor-survey::before,
+.investor-survey::after {
+    display: none !important;
+}
+
+.investor-survey .grid-overlay {
+    opacity: 0.35;
+}
+
+.problem-glow {
+    position: absolute;
+    left: -6%;
+    bottom: -18%;
+    width: min(48vw, 640px);
+    height: min(42vh, 460px);
+    pointer-events: none;
+    z-index: 0;
+    background: radial-gradient(ellipse at center, rgba(255, 59, 48, 0.15) 0%, rgba(255, 149, 0, 0.05) 42%, transparent 72%);
+    filter: blur(12px);
+}
+
+/* Two-column stage: left narrative stack | right mark */
+.problem-shell {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: min(1480px, 100%);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.55fr);
+    gap: clamp(1.5rem, 3vw, 2.75rem);
+    align-items: center;
+    min-height: 0;
+}
+
+.problem-main {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: clamp(1.15rem, 2.2vh, 1.65rem);
+    min-width: 0;
+}
+
+.problem-header {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.55rem;
+    text-align: left;
+    width: 100%;
+    max-width: 40rem;
+}
+
+.problem-header h2 {
+    margin: 0;
+    display: block;
+    white-space: normal;
+    font-size: clamp(1.55rem, 2.85vw, 2.65rem);
+    line-height: 1.08;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    color: #fff;
+    text-align: left;
+    max-width: 100%;
+}
+
+.problem-header__accent {
+    background: linear-gradient(135deg, #FF3B30 0%, #FF9500 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+.problem-header p {
+    margin: 0;
+    max-width: 34rem;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: clamp(0.88rem, 1.02vw, 1.02rem);
+    line-height: 1.45;
+    font-weight: 500;
+}
+
+.problem-cards {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: clamp(0.65rem, 1.05vw, 0.9rem);
+    align-items: stretch;
+    min-width: 0;
+    width: 100%;
+}
+
+/*
+ * Inset-icon problem tiles (NodeRails pattern, SuperView copy):
+ * dark inset media · bold white label bar
+ */
+.problem-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    aspect-ratio: 0.82 / 1;
+    min-height: clamp(220px, 34vh, 300px);
+    width: 100%;
+    padding: 0.45rem;
+    background: #121212;
+    border: 1px solid rgba(255, 90, 40, 0.35);
+    border-radius: 14px;
+    overflow: hidden;
+}
+
+.problem-card__media {
+    flex: 1 1 auto;
+    display: grid;
+    place-items: center;
+    min-height: 0;
+    border-radius: 10px;
+    background: linear-gradient(180deg, #0a0a0a 0%, #101010 100%);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.problem-card__media svg {
+    display: block;
+    width: min(95%, 6.5rem);
+    height: auto;
+    aspect-ratio: 1;
+}
+
+.problem-card__label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0.85rem 0.55rem 0.75rem;
+    color: #fff;
+    font-size: clamp(0.78rem, 0.95vw, 0.95rem);
+    font-weight: 750;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    text-align: center;
+    background: transparent;
+    -webkit-text-fill-color: #fff;
+}
+
+/* Mark column — asset untouched; only placement */
+.problem-mark {
+    position: relative;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    overflow: visible;
+    min-width: 0;
+}
+
+.problem-mark__img,
+.problem-mark img {
+    display: block;
+    width: min(100%, 420px);
+    max-height: min(58vh, 520px);
+    height: auto;
+    object-fit: contain;
+    object-position: center center;
+    background: transparent !important;
+    border: 0;
+    mix-blend-mode: normal;
+    filter: none;
+    -webkit-user-drag: none;
+    user-select: none;
+}
+
+@media (max-width: 900px) {
+    .problem-shell {
+        grid-template-columns: 1fr;
+        gap: 1.25rem;
+        align-items: start;
+    }
+
+    .problem-header {
+        max-width: none;
+    }
+
+    .problem-header h2 {
+        white-space: normal;
+        font-size: clamp(1.5rem, 4vw, 2.15rem);
+    }
+
+    .problem-mark {
+        order: -1;
+        justify-content: flex-start;
+        max-height: 200px;
+    }
+
+    .problem-mark img {
+        max-height: 180px;
+        max-width: 180px;
+    }
+
+    .problem-cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .problem-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-height: 760px) and (min-width: 961px) {
+    .problem-header h2 {
+        font-size: clamp(1.45rem, 2.5vw, 2.25rem);
+    }
+
+    .problem-main {
+        gap: 1rem;
+    }
+
+    .problem-card {
+        aspect-ratio: 0.85 / 1;
+        min-height: 200px;
+    }
+
+    .problem-card__label {
+        padding: 0.7rem 0.45rem 0.65rem;
+        font-size: 0.8rem;
+    }
+
+    .problem-mark img {
+        max-height: min(48vh, 380px);
+    }
+}

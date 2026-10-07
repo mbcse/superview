@@ -21,9 +21,8 @@ Open `http://127.0.0.1:4173` or `http://127.0.0.1:3000`.
 2. Problem — ideas never become testable books
 3. Solution — before / after
 4. Flow — six steps from sentence to paper invest
-5. Why different + features
-6. Product screens — compose, feed, vs S&P, paper book
-7. What’s real, market, competition, next + ask, team, close
+5. Product screens — compose, feed, vs S&P, paper book
+6. Market, competition, team, close
 
 ## Files
 

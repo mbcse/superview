@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="640" height="104" viewBox="0 0 640 104" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SuperView">
+  <g transform="scale(2.1666666666666665)">
+    <rect width="48" height="48" rx="13" fill="#0E8F8F"/>
+    <path d="M11 32.5H19L27 24.5" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="34" cy="17.5" r="5.5" fill="#FFFFFF"/>
+    <circle cx="34" cy="17.5" r="2" fill="#2EC4B6"/>
+  </g>
+  <text x="137.28" y="52" dominant-baseline="central"
+    font-family="Inter, Plus Jakarta Sans, Arial Black, Helvetica Neue, Arial, sans-serif"
+    font-weight="700" font-size="78" letter-spacing="-0.04em">
+    <tspan fill="#0A1A21">Super</tspan><tspan fill="#0E8F8F">View</tspan>
+  </text>
+</svg>
