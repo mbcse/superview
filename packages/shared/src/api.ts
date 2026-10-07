@@ -1,14 +1,41 @@
 import { z } from "zod";
 
-export const takeSentenceSchema = z.object({
-  sentence: z.string().min(1).max(280),
+const takeSentenceObject = z.object({
+  sentence: z.string().max(280).optional().default(""),
   horizon: z.string().optional(),
-  falsifier: z.string().optional()
+  falsifier: z.string().optional(),
+  world: z.enum(["STOCKS", "MEMES"]).optional().default("STOCKS"),
+  chainId: z.coerce.number().int().optional(),
+  parentTakeId: z.string().optional(),
+  lens: z.enum(["BELIEF", "SKY"]).optional().default("BELIEF"),
+  astrologySystem: z.enum(["VEDIC", "WESTERN"]).optional(),
+  chart: z.string().max(4000).optional()
 });
 
-export const decomposeRequestSchema = takeSentenceSchema.extend({
-  answers: z.array(z.string()).max(3).optional()
+function refineTakeSentence(
+  v: z.infer<typeof takeSentenceObject>,
+  ctx: z.RefinementCtx
+) {
+  const sentence = (v.sentence ?? "").trim();
+  const chart = (v.chart ?? "").trim();
+  if (v.lens === "SKY") {
+    if (chart.length < 8) ctx.addIssue({ code: "custom", path: ["chart"], message: "chart_required" });
+  } else if (!sentence) {
+    ctx.addIssue({ code: "custom", path: ["sentence"], message: "sentence_required" });
+  }
+}
+
+export const takeSentenceSchema = takeSentenceObject.superRefine(refineTakeSentence);
+
+export const investSchema = z.object({
+  mode: z.enum(["paper", "live", "WATCH", "DRY_RUN", "LIVE"]).optional(),
+  amountUsd: z.number().positive(),
+  idempotencyKey: z.string().min(8).max(80).optional()
 });
+
+export const decomposeRequestSchema = takeSentenceObject.extend({
+  answers: z.array(z.string()).max(3).optional()
+}).superRefine(refineTakeSentence);
 
 export const actionEditSchema = z.object({
   id: z.string(),

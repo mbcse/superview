@@ -18,6 +18,7 @@ import { TickValue } from "@/components/data/tick-value";
 import { useQuoteBook } from "@/components/social/price-stream";
 
 type Leg = {
+  tokenId?: string;
   symbol?: string;
   qty?: number;
   last?: number | null;
@@ -26,7 +27,11 @@ type Leg = {
   cost?: number | null;
 };
 
-function liveLast(quotes: ReturnType<typeof useQuoteBook>, symbol?: string, fallback?: number | null) {
+function liveLast(quotes: ReturnType<typeof useQuoteBook>, symbol?: string, fallback?: number | null, tokenId?: string) {
+  if (tokenId) {
+    const byId = quotes[tokenId] ?? quotes[tokenId.toUpperCase()];
+    if (byId?.last != null) return byId.last;
+  }
   if (!symbol) return fallback ?? null;
   const u = symbol.toUpperCase();
   const bare = tick(u).toUpperCase();
@@ -116,7 +121,7 @@ function PocketCard({
   const cashUsd = Number(p.mark?.cashUsd ?? 0);
   const hasPosition = legs.some((l) => (l.qty ?? 0) > 0);
   const livePositions = legs.reduce((s, l) => {
-    const lastPx = liveLast(quotes, l.symbol, l.last);
+    const lastPx = liveLast(quotes, l.symbol, l.last, l.tokenId);
     const qty = l.qty ?? 0;
     if (lastPx != null && qty) return s + lastPx * qty;
     return s + Number(l.mtm ?? 0);
@@ -125,12 +130,13 @@ function PocketCard({
   const cost = legs.reduce((s, l) => s + Number(l.cost ?? 0), 0);
   const pnl = livePositions - cost || p.unrealizedUsd || p.mark?.unrealizedUsd;
   const weightOf = (leg: Leg) =>
-    nav > 0 ? Math.round((((liveLast(quotes, leg.symbol, leg.last) ?? 0) * (leg.qty ?? 0) || Number(leg.mtm ?? 0)) / nav) * 10_000) : 0;
+    nav > 0 ? Math.round((((liveLast(quotes, leg.symbol, leg.last, leg.tokenId) ?? 0) * (leg.qty ?? 0) || Number(leg.mtm ?? 0)) / nav) * 10_000) : 0;
   const book = useLiveBook(
     legs.map((l) => ({
+      tokenId: l.tokenId,
       symbol: l.symbol ?? "",
       weightBps: weightOf(l) || 1,
-      last: liveLast(quotes, l.symbol, l.last),
+      last: liveLast(quotes, l.symbol, l.last, l.tokenId),
       publish: l.qty && l.cost ? Number(l.cost) / l.qty : null
     })),
     { investedUsd: cost > 0 ? cost : null }
@@ -146,6 +152,9 @@ function PocketCard({
             <Chip tone={p.mode === "LIVE" ? "live" : "paper"}>{p.mode === "DRY_RUN" ? "Paper · not real money" : p.mode === "LIVE" ? "Live" : "Watch"}</Chip>
             <Chip>{approval ? "Ask me first" : "Agent"}</Chip>
           </div>
+          {p.mode === "LIVE" && p.take?.chainId === 101 ? (
+            <p className="mt-2 text-[12px] text-muted">Keep 0.03 SOL in the wallet for fees.</p>
+          ) : null}
           <h2 className="view mt-3 text-[16px] font-medium leading-snug tracking-[-0.015em] text-ink">
             <Link href={`/app/takes/${p.takeId}`}>{sentence}</Link>
           </h2>
@@ -189,7 +198,7 @@ function PocketCard({
           <AllocationBar parts={legs.map((l) => ({ symbol: l.symbol ?? "", weightBps: weightOf(l) }))} />
           <div className="mt-2">
             {legs.map((leg) => {
-              const lastPx = liveLast(quotes, leg.symbol, leg.last);
+              const lastPx = liveLast(quotes, leg.symbol, leg.last, leg.tokenId);
               const qty = leg.qty ?? 0;
               const livePnl =
                 lastPx != null && qty
@@ -201,13 +210,15 @@ function PocketCard({
                 ?? null;
               return (
                 <HoldingRow
-                  key={leg.symbol}
+                  key={leg.tokenId ?? leg.symbol}
                   symbol={leg.symbol ?? ""}
+                  tokenId={leg.tokenId}
                   weightBps={weightOf(leg)}
                   last={lastPx}
                   chgPct={day}
                   pnlUsd={livePnl}
                   takeId={p.takeId}
+                  chainId={p.take?.chainId}
                 />
               );
             })}
@@ -354,24 +365,36 @@ export default function PocketsClient({ pockets }: { pockets: any[] }) {
     );
   }
 
-  const total = rows.reduce((s, p) => s + Number(p.navUsd ?? p.mark?.navUsd ?? 0), 0);
+  const stocks = rows.filter((p) => (p.take?.world ?? "STOCKS") === "STOCKS");
+  const memes = rows.filter((p) => p.take?.world === "MEMES");
+
+  function Desk({ title, items }: { title: string; items: any[] }) {
+    const nav = items.reduce((s, p) => s + Number(p.navUsd ?? p.mark?.navUsd ?? 0), 0);
+    if (!items.length) return null;
+    return (
+      <section className="mt-10">
+        <p className="text-[11px] uppercase tracking-[0.08em] text-muted">{title}</p>
+        <p className="figure mt-2 text-[32px] text-ink md:text-[40px]">
+          <AnimatedNumber value={nav} format={(n) => fmtUsd(n)} />
+        </p>
+        <div className="mt-4 space-y-4">
+          {items.map((p) => (
+            <PocketCard key={p.id} p={p} fetchApi={fetchApi} setNotice={setNotice} setRows={setRows} />
+          ))}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div>
-      <p className="text-[11px] uppercase tracking-[0.08em] text-muted">Paper allocated</p>
-      <p className="figure mt-2 text-[40px] text-ink md:text-[56px]">
-        <AnimatedNumber value={total} format={(n) => fmtUsd(n)} />
+      <p className="text-[11px] uppercase tracking-[0.08em] text-muted">Desks</p>
+      <p className="mt-2 text-[15px] text-muted">
+        Stocks and memes stay on their own cash books. No blended total.
       </p>
-      <p className="mt-3 text-[13px] text-muted">
-        Tracking <span className="font-mono text-ink">{rows.length}</span> {rows.length === 1 ? "pocket" : "pockets"}
-      </p>
-      <h2 className="display mt-12 text-[20px] text-ink">Your pockets</h2>
       {notice ? <div className="mt-4"><Notice tone="ok">{notice}</Notice></div> : null}
-      <div className="mt-4 space-y-4">
-      {rows.map((p) => (
-        <PocketCard key={p.id} p={p} fetchApi={fetchApi} setNotice={setNotice} setRows={setRows} />
-      ))}
-      </div>
+      <Desk title="Stocks desk" items={stocks} />
+      <Desk title="Memes desk" items={memes} />
     </div>
   );
 }

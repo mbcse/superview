@@ -10,21 +10,30 @@ import { useLiveQuote } from "@/components/social/price-stream";
 import { RoleChip } from "@/components/social/role-chip";
 import { decisionLabel } from "@/lib/agent-copy";
 import { API_ORIGIN, fmtVs, changeTone } from "@/lib/fmt";
+import { SkyThesis } from "@/components/social/sky-thesis";
 
 const VsChart = dynamic(() => import("@/components/charts/vs-chart").then((m) => m.VsChart), { ssr: false });
 const RANGES = ["1D", "1W", "1M", "YTD"] as const;
 
-function LiveHolding({ h }: { h: { id?: string; token?: { symbol?: string; logoUrl?: string | null }; weightBps: number; rationale?: string; role?: string; score?: { role?: string }; last?: number; chgPct?: number } }) {
-  const q = useLiveQuote(h.token?.symbol);
+function LiveHolding({
+  h,
+  chainId
+}: {
+  h: { id?: string; tokenId?: string; token?: { symbol?: string; logoUrl?: string | null; chainId?: number }; weightBps: number; rationale?: string; role?: string; score?: { role?: string }; last?: number; chgPct?: number };
+  chainId?: number;
+}) {
+  const q = useLiveQuote(h.token?.symbol, h.tokenId);
   return (
     <HoldingRow
       symbol={h.token?.symbol ?? ""}
+      tokenId={h.tokenId}
       weightBps={h.weightBps}
       last={q?.last ?? h.last}
       chgPct={q?.chgPct ?? h.chgPct}
       rationale={h.rationale}
       role={h.role ?? h.score?.role}
       logoUrl={h.token?.logoUrl}
+      chainId={h.token?.chainId ?? chainId}
     />
   );
 }
@@ -33,18 +42,26 @@ export function PublicTake({
   takeId,
   handle,
   sentence,
+  chart,
+  lens,
+  astrologySystem,
   vs,
   agentLine,
-  holdings
+  holdings,
+  chainId
 }: {
   takeId: string;
   handle: string;
   sentence: string;
+  chart?: string | null;
+  lens?: string;
+  astrologySystem?: string | null;
   vs: number | null;
   agentLine: string;
+  chainId?: number;
   holdings: Array<{
     id?: string;
-    token?: { symbol?: string; logoUrl?: string | null };
+    token?: { symbol?: string; logoUrl?: string | null; chainId?: number };
     weightBps: number;
     rationale?: string;
     role?: string;
@@ -80,7 +97,18 @@ export function PublicTake({
     <div className="space-y-6">
       <p className="text-[11px] uppercase tracking-[0.08em] text-muted">A view on SuperView</p>
       <p className="mt-6 text-[13px] text-muted">{handle}</p>
-      <h1 className="display mt-3 text-[28px] text-ink md:text-[40px]">{sentence}</h1>
+      {lens === "SKY" ? (
+        <SkyThesis size="share" chart={chart} prediction={sentence} />
+      ) : (
+        <h1 className="display mt-3 text-[28px] text-ink md:text-[40px]">{sentence}</h1>
+      )}
+      {lens === "SKY" ? (
+        <p className="mt-3">
+          <span className="inline-flex items-center rounded-full bg-mist px-2.5 py-0.5 text-[12px] font-medium text-ink">
+            Astrology{astrologySystem === "VEDIC" ? " · Vedic" : astrologySystem === "WESTERN" ? " · Western" : ""}
+          </span>
+        </p>
+      ) : null}
       <p className="figure mt-6 text-[28px]">
         <span className={tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-muted"}>
           {vs == null ? "—" : fmtVs(vs)}
@@ -100,7 +128,7 @@ export function PublicTake({
       <Surface className="p-5">
         <h2 className="display text-[20px] text-ink">Behind the view</h2>
         {holdings.map((h, i) => (
-          <LiveHolding key={h.id ?? h.token?.symbol ?? i} h={h} />
+          <LiveHolding key={h.id ?? h.token?.symbol ?? i} h={h} chainId={chainId} />
         ))}
         {holdings.some((h) => h.role) ? (
           <div className="mt-3 flex flex-wrap gap-2">

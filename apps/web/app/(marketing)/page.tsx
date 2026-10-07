@@ -37,7 +37,7 @@ export default async function LandingPage() {
             Say what you believe about the world. Watch it play out.
           </h1>
           <p className="mt-4 max-w-[30rem] text-[17px] leading-relaxed text-muted">
-            Write a view. SuperView sizes a basket of stock tokens. Paper uses live markets without live money.
+            Write a view. SuperView sizes a basket of stock tokens or memecoins. Paper uses live markets without live money.
           </p>
           <div className="mt-7">
             <HeroDemo />

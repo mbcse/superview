@@ -11,6 +11,12 @@ export function classifyRegime(input: RegimeInput): "RISK_ON" | "NEUTRAL" | "RIS
   return "NEUTRAL";
 }
 
+export function oracleBand(world?: string | null, source?: string | null, inSession = true) {
+  if (world === "MEMES") return 0.04;
+  if (source === "XSTOCKS") return inSession ? 0.015 : 0.04;
+  return 0.015;
+}
+
 export function quoteWithinOracle(quotePrice: number, oraclePrice: number, tol = 0.02): boolean {
   if (oraclePrice <= 0) return false;
   return Math.abs(quotePrice - oraclePrice) / oraclePrice <= tol;

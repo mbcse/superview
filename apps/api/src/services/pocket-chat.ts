@@ -1,4 +1,5 @@
 import { prisma } from "@takeandstake/db";
+import { displaySymbol } from "@takeandstake/shared";
 import { instructPocket } from "@takeandstake/ai";
 import type { Env } from "@takeandstake/config";
 import { depositPaperUsd, executePaperRebalance, runDryRunInvest, weightsFromTrimAdd } from "./paper-invest.js";
@@ -40,7 +41,7 @@ export async function handlePocketChat(pocketId: string, userId: string, body: s
     });
     reply = parsed.reply || "I’ll rebalance this pocket as the story changes.";
   } else if ((parsed.intent === "trim" || parsed.intent === "add_name") && parsed.symbol) {
-    const symbol = parsed.symbol.replace(/^RH/, "").toUpperCase();
+    const symbol = displaySymbol(parsed.symbol).toUpperCase();
     const target = pocket.take.revisions[0]?.target;
     const holdings = target?.holdings ?? [];
     let addTokenId: string | undefined;

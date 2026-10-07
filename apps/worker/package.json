@@ -16,6 +16,7 @@
     "@takeandstake/core": "workspace:*",
     "@takeandstake/db": "workspace:*",
     "@takeandstake/shared": "workspace:*",
+    "@takeandstake/markets": "workspace:*",
     "bullmq": "^5.34.5",
     "ioredis": "^5.4.2",
     "tsx": "^4.19.2"

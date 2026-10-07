@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "response": {
+    "inAmount": "10000000",
+    "outAmount": "2500000000",
+    "priceImpact": 0.012
+  }
+}

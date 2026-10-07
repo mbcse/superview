@@ -101,8 +101,8 @@ export function pickQuoteValue(
   field: "last" | "tokenLast" = "last"
 ): number | null {
   const u = symbol.toUpperCase();
-  const bare = u.replace(/^RH/, "");
-  const keys = [u, bare, bare ? `RH${bare}` : ""].filter(Boolean);
+  const bare = u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
+  const keys = [u, bare, `RH${bare}`].filter(Boolean);
   const get = (k: string) => {
     const v = quotes instanceof Map ? quotes.get(k) ?? quotes.get(k.toUpperCase()) : quotes[k] ?? quotes[k.toUpperCase()];
     if (v == null) return null;

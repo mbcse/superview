@@ -54,4 +54,10 @@ describe("paperFillDeltas", () => {
     expect(deltas.cashDelta).toBe(-1_000_000n);
     expect(() => assertDoubleEntry(lines)).not.toThrow();
   });
+
+  it("uses per-asset decimals for meme-sized fills", () => {
+    const sold = prepareSellFill({ requestedUsd: 12, haveUsd: 12, haveQty: 2, implied: 6, decimals: 6 });
+    expect(sold.tokenAmount).toBe(2_000_000n);
+    expect(sold.usd).toBeCloseTo(12);
+  });
 });

@@ -6,6 +6,9 @@ import {
   INDIRECT_MAX_BPS,
   ISSUER_CAP_BPS,
   MAX_HOLDINGS,
+  MEME_MAX_HOLDINGS,
+  MEME_MAX_WEIGHT,
+  MEME_MIN_HOLDINGS,
   MIN_HOLDING_BPS,
   MIN_HOLDINGS,
   SECTOR_CAP_BPS,
@@ -51,9 +54,13 @@ export type ConstructionResult =
 export function constructPortfolio(
   candidates: Candidate[],
   cashBps = DEFAULT_CASH_BPS,
-  opts: { singleTickerAnchor?: boolean } = {}
+  opts: { singleTickerAnchor?: boolean; world?: "STOCKS" | "MEMES" } = {}
 ): ConstructionResult {
-  const cash = Math.min(Math.max(cashBps, 0), 1_000);
+  const meme = opts.world === "MEMES";
+  const minHold = meme ? MEME_MIN_HOLDINGS : MIN_HOLDINGS;
+  const maxHold = meme ? MEME_MAX_HOLDINGS : MAX_HOLDINGS;
+  const issuerCap = meme ? Math.round(MEME_MAX_WEIGHT * TOTAL_BPS) : ISSUER_CAP_BPS;
+  const cash = Math.min(Math.max(cashBps, 0), meme ? 500 : 1_000);
   const eligible = candidates.filter((c) => !c.halt && c.exposure > 0 && c.confidence > 0);
   const scored = eligible.map((c) => {
     const purity = c.purity ?? c.exposure;
@@ -64,8 +71,9 @@ export function constructPortfolio(
     return { ...c, role: (c.role ?? "direct") as HoldingRole, score: raw };
   });
   scored.sort((a, b) => b.score - a.score);
-  const picked = scored.slice(0, MAX_HOLDINGS);
-  if (picked.length < MIN_HOLDINGS) {
+  const picked = scored.slice(0, maxHold);
+  if (picked.length < minHold) {
+    if (meme && picked.length >= 1) return themeEqualWeight(picked, cash, maxHold, issuerCap);
     const coverage: Record<string, boolean> = {};
     for (const c of candidates) coverage[c.actionId] = false;
     return { ok: false, code: "INSUFFICIENT_ELIGIBLE_EXPOSURE", coverage };
@@ -78,14 +86,15 @@ export function constructPortfolio(
     weightBps: Math.floor((c.score / totalScore) * investable)
   }));
 
-  const maxIssuer = opts.singleTickerAnchor ? SINGLE_TICKER_ANCHOR_BPS : ISSUER_CAP_BPS;
+  const maxIssuer = meme ? issuerCap : opts.singleTickerAnchor ? SINGLE_TICKER_ANCHOR_BPS : ISSUER_CAP_BPS;
   for (let i = 0; i < 16; i++) {
     weights = clampAndRedistribute(weights, investable, maxIssuer);
   }
 
-  weights = weights.filter((w) => w.weightBps >= MIN_HOLDING_BPS);
-  if (weights.length < MIN_HOLDINGS) {
-    return themeEqualWeight(picked, cash);
+  const minBps = meme ? 500 : MIN_HOLDING_BPS;
+  weights = weights.filter((w) => w.weightBps >= minBps);
+  if (weights.length < minHold) {
+    return themeEqualWeight(picked, cash, maxHold, meme ? issuerCap : undefined);
   }
 
   const directSum = weights.filter((w) => w.role === "direct").reduce((s, w) => s + w.weightBps, 0);
@@ -107,9 +116,9 @@ export function constructPortfolio(
   for (let i = 0; i < 8; i++) {
     weights = clampAndRedistribute(weights, investable, maxIssuer);
   }
-  weights = weights.filter((w) => w.weightBps >= MIN_HOLDING_BPS);
-  if (weights.length < MIN_HOLDINGS) {
-    return themeEqualWeight(picked, cash);
+  weights = weights.filter((w) => w.weightBps >= minBps);
+  if (weights.length < minHold) {
+    return themeEqualWeight(picked, cash, maxHold, meme ? issuerCap : undefined);
   }
 
   const holdingSum = weights.reduce((s, w) => s + w.weightBps, 0);
@@ -138,11 +147,14 @@ export function constructPortfolio(
 
 function themeEqualWeight(
   picked: Array<Candidate & { role: HoldingRole; score: number }>,
-  cash: number
+  cash: number,
+  maxHold = MAX_HOLDINGS,
+  nameCap?: number
 ): ConstructionResult {
-  const take = picked.slice(0, Math.min(MAX_HOLDINGS, picked.length));
+  const take = picked.slice(0, Math.min(maxHold, picked.length));
   const investable = TOTAL_BPS - cash;
-  const each = Math.floor(investable / take.length);
+  const cap = nameCap ?? investable;
+  const each = Math.min(cap, Math.floor(investable / take.length));
   const holdings = take.map((c) => ({
     tokenId: c.tokenId,
     symbol: c.symbol,
@@ -154,7 +166,7 @@ function themeEqualWeight(
   const holdingSum = each * take.length;
   return {
     ok: true,
-    cashBps: Math.min(1_000, Math.max(0, TOTAL_BPS - holdingSum)),
+    cashBps: Math.max(0, TOTAL_BPS - holdingSum),
     diffs: holdings.map((h) => ({
       symbol: h.symbol,
       proposedBps: h.weightBps,

@@ -35,9 +35,9 @@ export async function syncCorporateActions() {
   for (const row of rows) {
     const symbol = String(row.tokenSymbol ?? row.symbol ?? "").toUpperCase();
     if (!symbol) continue;
-    const bare = symbol.replace(/^RH/, "");
+    const { robinhoodAliases } = await import("@takeandstake/shared");
     const token = await prisma.stockToken.findFirst({
-      where: { chainId: 4663, symbol: { in: [...new Set([symbol, bare, bare ? `RH${bare}` : ""].filter(Boolean))] } }
+      where: { chainId: 4663, symbol: { in: robinhoodAliases(symbol) } }
     });
     if (!token) continue;
     const rhjId = String(row.id ?? row.rhjId ?? `${token.symbol}:${row.type ?? "action"}:${row.processDate ?? row.effectiveDate ?? ""}`);

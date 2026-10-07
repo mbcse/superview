@@ -2,71 +2,91 @@
 
 import { useEffect, useState } from "react";
 import { useReducedMotion } from "motion/react";
+import { DESKS, type World } from "@/lib/world";
 import type { StreamItem } from "@/components/social/research-stream";
 
 type Line = { id: string; kicker: string; title: string; detail?: string };
 
-const AMBIENT: Record<string, string[]> = {
-  queued: [
-    "Opening a research desk for this view.",
-    "Connecting the catalog, quotes, and models.",
-    "Holding the sentence still before naming any company."
-  ],
-  interpret: [
-    "Reading the belief, not hunting tickers yet.",
-    "Asking who earns more if this view is right.",
-    "Writing the mechanism, horizon, and what would prove it wrong."
-  ],
-  retrieve: [
-    "Walking the Robinhood Chain catalog name by name.",
-    "Setting aside companies that do not touch this story.",
-    "Keeping a shortlist of names that actually fit."
-  ],
-  discover: [
-    "Searching beyond the first catalog hit.",
-    "Looking for suppliers and second-order names.",
-    "Matching web names back to holdable stock tokens."
-  ],
-  diligence: [
-    "Opening notes on each shortlisted name.",
-    "Asking how clean the exposure is, not just the headline.",
-    "Dropping names that rhyme but do not pay."
-  ],
-  analyst: [
-    "Scoring how directly each name tracks the view.",
-    "Separating core holdings from shared-interest names.",
-    "Marking conviction so sizing is not guesswork."
-  ],
-  portfolio: [
-    "Building a 5 to 12 name book, not a single bet.",
-    "Capping any one name so the basket can survive a miss.",
-    "Writing why each weight is here."
-  ],
-  critic: [
-    "A second model is reading the book for overlap.",
-    "Checking whether the basket still says the same thing twice.",
-    "Pushing weak names out before publish."
-  ],
-  revise: [
-    "Rebuilding weights after the risk pass.",
-    "Keeping only the names that still earn a seat."
-  ],
-  draft: ["Locking the basket and preparing the public view."],
-  done: ["Research is complete."]
-};
+function catalogName(world?: World, chainId?: number) {
+  if (world == null && chainId == null) return "this desk";
+  const desk = DESKS.find((d) => d.world === (world ?? "STOCKS") && d.chainId === (chainId ?? (world === "MEMES" ? 101 : 4663)));
+  if (desk && world) return `${world === "MEMES" ? "Memes" : "Stocks"} · ${desk.title}`;
+  if (desk) return desk.title;
+  if (chainId === 101) return "Solana";
+  if (chainId === 4663) return "Robinhood Chain";
+  return "this desk";
+}
+
+function ambientFor(stage: string, world?: World, chainId?: number): string[] {
+  const catalog = catalogName(world, chainId);
+  const names = world === "MEMES" ? "coins" : "names";
+  return (
+    {
+      queued: [
+        `Opening a research desk on ${catalog}.`,
+        "Connecting the catalog, quotes, and models.",
+        "Holding the sentence still before naming any company."
+      ],
+      interpret: [
+        "Reading the belief, not hunting tickers yet.",
+        "Asking who earns more if this view is right.",
+        "Writing the mechanism, horizon, and what would prove it wrong."
+      ],
+      retrieve: [
+        `Walking the ${catalog} catalog ${names === "coins" ? "coin by coin" : "name by name"}.`,
+        `Setting aside ${names} that do not touch this story.`,
+        `Keeping a shortlist of ${names} that actually fit.`
+      ],
+      discover: [
+        "Searching beyond the first catalog hit.",
+        "Looking for suppliers and second-order names.",
+        "Matching web names back to holdable stock tokens."
+      ],
+      diligence: [
+        "Opening notes on each shortlisted name.",
+        "Asking how clean the exposure is, not just the headline.",
+        "Dropping names that rhyme but do not pay."
+      ],
+      analyst: [
+        "Scoring how directly each name tracks the view.",
+        "Separating core holdings from shared-interest names.",
+        "Marking conviction so sizing is not guesswork."
+      ],
+      portfolio: [
+        "Building a 5 to 12 name book, not a single bet.",
+        "Capping any one name so the basket can survive a miss.",
+        "Writing why each weight is here."
+      ],
+      critic: [
+        "A second model is reading the book for overlap.",
+        "Checking whether the basket still says the same thing twice.",
+        "Pushing weak names out before publish."
+      ],
+      revise: ["Rebuilding weights after the risk pass.", "Keeping only the names that still earn a seat."],
+      draft: ["Locking the basket and preparing the public view."],
+      done: ["Research is complete."]
+    }[stage] ?? [
+      `Opening a research desk on ${catalog}.`,
+      "Connecting the catalog, quotes, and models.",
+      "Holding the sentence still before naming any company."
+    ]
+  );
+}
 
 function countIn(message: string) {
   const m = message.match(/(\d+)/);
   return m ? Number(m[1]) : null;
 }
 
-function narrate(item: StreamItem): Omit<Line, "id"> {
+function narrate(item: StreamItem, world?: World, chainId?: number): Omit<Line, "id"> {
   const n = countIn(item.message);
   const msg = item.message;
   const stage = item.stage.toLowerCase();
+  const catalog = catalogName(world, chainId);
+  const unit = world === "MEMES" ? "coins" : "names";
 
   if (stage === "queued") {
-    return { kicker: "Desk", title: "Queued for research", detail: "The agent is picking up your view." };
+    return { kicker: "Desk", title: `Queued on ${catalog}`, detail: "The agent is picking up your view." };
   }
   if (stage === "interpret") {
     if (/reus/i.test(msg)) return { kicker: "Thesis", title: "Reusing the last thesis", detail: msg };
@@ -78,8 +98,11 @@ function narrate(item: StreamItem): Omit<Line, "id"> {
     if (/reading \d+/i.test(msg)) {
       return {
         kicker: "Catalog",
-        title: `Reading ${n ?? "the"} Robinhood Chain names`,
-        detail: "Screening listed stock tokens for a real link to this view."
+        title: `Reading ${n ?? "the"} ${catalog} ${unit}`,
+        detail:
+          world === "MEMES"
+            ? "Screening launchpad coins for a real link to this view."
+            : "Screening listed stock tokens for a real link to this view."
       };
     }
     if (/screened/i.test(msg)) {
@@ -88,11 +111,11 @@ function narrate(item: StreamItem): Omit<Line, "id"> {
     if (/look relevant/i.test(msg)) {
       return {
         kicker: "Shortlist",
-        title: n != null ? `${n} companies look relevant` : msg,
+        title: n != null ? `${n} ${unit} look relevant` : msg,
         detail: "These names survived the first screen."
       };
     }
-    return { kicker: "Catalog", title: msg, detail: "Still walking the listed universe." };
+    return { kicker: "Catalog", title: msg, detail: `Still walking ${catalog}.` };
   }
   if (stage === "discover") {
     if (/web search for extra/i.test(msg)) {
@@ -151,7 +174,15 @@ function narrate(item: StreamItem): Omit<Line, "id"> {
   return { kicker: item.stage, title: msg };
 }
 
-export function ResearchLiveLog({ events }: { events: StreamItem[] }) {
+export function ResearchLiveLog({
+  events,
+  world,
+  chainId
+}: {
+  events: StreamItem[];
+  world?: World;
+  chainId?: number;
+}) {
   const reduce = useReducedMotion();
   const [pulse, setPulse] = useState(0);
   const last = events[events.length - 1];
@@ -164,15 +195,15 @@ export function ResearchLiveLog({ events }: { events: StreamItem[] }) {
   }, [reduce, stage, last?.message]);
 
   const real = events.map((item, i) => {
-    const n = narrate(item);
+    const n = narrate(item, world, chainId);
     return { id: `${item.stage}-${i}-${item.message}`, ...n };
   });
-  const ambientPool = AMBIENT[stage] ?? AMBIENT.queued!;
+  const ambientPool = ambientFor(stage, world, chainId);
   const ambient = ambientPool[pulse % ambientPool.length]!;
   const current = real[real.length - 1] ?? {
     id: "wait",
     kicker: "Desk",
-    title: "Starting research",
+    title: `Starting research on ${catalogName(world, chainId)}`,
     detail: "Waiting for the first note from the agent."
   };
   const history = real.slice(-7, -1).reverse();

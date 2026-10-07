@@ -104,7 +104,7 @@ export function VsSpyGraph() {
           opacity: clamp(frame, 170, 200, 0, 1)
         }}
       >
-        Illustrative path from a sample view. Live marks update from Robinhood quotes.
+        Illustrative path from a sample view. Live marks update from market quotes.
       </div>
     </AbsoluteFill>
   );

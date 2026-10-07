@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fill, INTERPRETER_PROMPT } from "../src/prompts/index.js";
+import { fill, INTERPRETER_PROMPT, ASTROLOGY_INTERPRETER_PROMPT, MONITOR_PROMPT, astrologyCanon } from "../src/prompts/index.js";
 import { interpreterSchema } from "../src/prompts/schemas.js";
 import { genObject } from "../src/generate.js";
 import { shouldRefuseView } from "../src/view-guard.js";
@@ -26,9 +26,37 @@ loadRootOpenAiKey();
 
 describe("prompt contract", () => {
   it("fills interpreter variables", () => {
-    const p = fill(INTERPRETER_PROMPT, { view: "humanoid robots in every home", date: "2026-09-30", marketContext: "" });
+    const p = fill(INTERPRETER_PROMPT, {
+      view: "humanoid robots in every home",
+      date: "2026-09-30",
+      marketContext: "",
+      desk: "Stocks · Solana"
+    });
     expect(p).toContain("humanoid robots in every home");
+    expect(p).toContain("Stocks · Solana");
+    expect(p).not.toContain("Robinhood Chain");
     expect(p).toContain("Only refuse if the input is empty");
+    const sky = fill(ASTROLOGY_INTERPRETER_PROMPT, {
+      view: "Saturn transits the 10th",
+      headline: "",
+      date: "2026-10-07",
+      system: "VEDIC",
+      canon: astrologyCanon("VEDIC"),
+      desk: "Stocks · Solana",
+      marketContext: ""
+    });
+    expect(sky).toContain("PRIMARY SYSTEM (VEDIC)");
+    expect(sky).toContain("Stocks · Solana");
+    const monitor = fill(MONITOR_PROMPT, {
+      thesis: "Labor stays tight.",
+      positions: "[]",
+      evidence: "none",
+      sky: JSON.stringify({ system: "VEDIC", chart: "Saturn transits the 10th." }),
+      mandate: "Autopilot",
+      driftThreshold: "200 bps"
+    });
+    expect(monitor).toContain("Saturn transits the 10th.");
+    expect(monitor).toContain("sky read changed");
   });
 
   it("schema refuses only with flag", () => {
@@ -74,7 +102,8 @@ describe("golden interpreter", () => {
             prompt: fill(INTERPRETER_PROMPT, {
               view: g.sentence,
               date: "2026-10-02",
-              marketContext: ""
+              marketContext: "",
+              desk: "Stocks · Robinhood Chain"
             }),
             label: `golden:${g.id}`
           });

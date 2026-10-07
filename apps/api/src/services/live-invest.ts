@@ -17,10 +17,34 @@ import {
   formatUnits,
   type Address
 } from "@takeandstake/chain";
+import { LIVE_DAILY_CAP_USD_MEMES, LIVE_MAX_TRADE_USD_MEMES } from "@takeandstake/shared";
+import { memePassesGates } from "@takeandstake/markets";
 import { grantAllows } from "../wallet-bind.js";
 
 function isHexAddress(addr: string) {
   return /^0x[0-9a-fA-F]{40}$/.test(addr);
+}
+
+const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+export function fillFromTransferLogs(
+  logs: Array<{ address?: string; topics?: string[]; data?: string }>,
+  token: string,
+  wallet: string
+): string | null {
+  const toTopic = `0x${wallet.slice(2).toLowerCase().padStart(64, "0")}`;
+  const hit = logs.find(
+    (l) =>
+      (l.address ?? "").toLowerCase() === token.toLowerCase() &&
+      (l.topics?.[0] ?? "").toLowerCase() === TRANSFER_TOPIC &&
+      (l.topics?.[2] ?? "").toLowerCase() === toTopic
+  );
+  if (!hit?.data) return null;
+  try {
+    return BigInt(hit.data).toString();
+  } catch {
+    return null;
+  }
 }
 
 async function usdgBalance(_rpcUrl: string | undefined, owner: Address) {
@@ -92,9 +116,7 @@ export async function readUsdgBalance(env: Env, address: string) {
 
 export async function runLiveInvest(pocketId: string, env: Env, userId: string, amountUsd?: number) {
   const pause = await prisma.featureFlag.findUnique({ where: { key: "pause_trading" } });
-  const live = await prisma.featureFlag.findUnique({ where: { key: "live_trading" } });
   if (pause?.enabled) return { error: "paused" as const };
-  if (!live?.enabled || env.APP_MODE !== "live") return { error: "live_disabled" as const };
   if (!env.PRIVY_AUTHORIZATION_KEY) return { error: "no_signer" as const };
 
   const pocket = await prisma.pocket.findUnique({
@@ -114,7 +136,15 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string, 
   });
   if (!pocket || pocket.userId !== userId || pocket.mode !== "LIVE") return { error: "not_found" as const };
   if (pocket.user.jurisdictionStatus !== "ALLOWED") return { error: "restricted_jurisdiction" as const };
-  const wallet = pocket.user.wallets.find((w) => w.isPrimary) ?? pocket.user.wallets[0];
+  const rhMeme = pocket.take.world === "MEMES";
+  const flag = await prisma.featureFlag.findUnique({
+    where: { key: rhMeme ? "live_rh_bags" : "live_trading" }
+  });
+  if (!flag?.enabled || env.APP_MODE !== "live") return { error: "live_disabled" as const };
+  if (rhMeme && !pocket.user.memesRiskAckAt) return { error: "memes_ack_required" as const };
+  const capTrade = rhMeme ? LIVE_MAX_TRADE_USD_MEMES : env.LIVE_MAX_TRADE_USD;
+  const capDay = rhMeme ? LIVE_DAILY_CAP_USD_MEMES : env.LIVE_DAILY_CAP_USD;
+  const wallet = pocket.user.wallets.find((w) => w.chainId === 4663 && w.isPrimary) ?? pocket.user.wallets.find((w) => w.chainId === 4663) ?? pocket.user.wallets[0];
   if (!wallet?.privyWalletId) return { error: "no_wallet" as const };
   const grant = wallet.signerGrants.find((g) => !g.revokedAt && g.expiresAt > new Date());
   if (!grant) return { error: "no_grant" as const };
@@ -124,7 +154,7 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string, 
   if (!target) return { error: "no_target" as const };
   const rpc = env.ALCHEMY_RPC_URL || env.ROBINHOOD_RPC_URL;
   const onchain = await usdgBalance(rpc, wallet.address as Address);
-  const spendUsd = Math.min(amountUsd ?? onchain.usd, onchain.usd, env.LIVE_DAILY_CAP_USD);
+  const spendUsd = Math.min(amountUsd ?? onchain.usd, onchain.usd, capDay);
   if (!(spendUsd > 1)) return { error: "no_usdg" as const };
 
   const idempotencyKey = hashIdempotency(["live", pocket.id, String(Math.round(spendUsd * 100)), target.id]);
@@ -161,15 +191,39 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string, 
       legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "halt" });
       continue;
     }
-    if (usd > env.LIVE_MAX_TRADE_USD || usd > Number(grant.maxPerTxUsd)) {
+    if (usd > capTrade || usd > Number(grant.maxPerTxUsd)) {
       skipped += 1;
       legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "cap" });
       continue;
     }
-    if (spentToday + usd > env.LIVE_DAILY_CAP_USD) {
+    if (spentToday + usd > capDay) {
       skipped += 1;
       legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "daily_cap" });
       continue;
+    }
+    if (rhMeme) {
+      if ((h.token.riskFlags as { noExit?: boolean } | null)?.noExit) {
+        skipped += 1;
+        legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: "no_exit" });
+        continue;
+      }
+      const gate = memePassesGates({
+        liquidityUsd: Number(h.token.liquidityUsd ?? 0),
+        launchedAt: h.token.launchedAt,
+        risk: (h.token.riskFlags ?? {}) as {
+          mintAuthorityDisabled?: boolean;
+          freezeAuthorityDisabled?: boolean;
+          topHolders?: number;
+          devBalance?: number;
+          isSus?: boolean;
+          token2022Risk?: string[];
+        }
+      });
+      if (!gate.ok) {
+        skipped += 1;
+        legsOut.push({ symbol: h.token.symbol, status: "SKIPPED", skip: gate.reasons[0] ?? "risk" });
+        continue;
+      }
     }
     if (!env.ZEROX_API_KEY || !isHexAddress(h.token.contractAddress)) {
       skipped += 1;
@@ -275,7 +329,17 @@ export async function runLiveInvest(pocketId: string, env: Env, userId: string, 
         await tx.ledgerEntry.createMany({
           data: [
             { transactionId: ledgerTx.id, accountId: cash.id, amount: (-sell).toString(), usdValue: -usd },
-            { transactionId: ledgerTx.id, accountId: pos.id, amount: quote.buyAmount, usdValue: usd }
+            {
+              transactionId: ledgerTx.id,
+              accountId: pos.id,
+              amount:
+                fillFromTransferLogs(
+                  (rec.logs ?? []) as Array<{ address?: string; topics?: string[]; data?: string }>,
+                  h.token.contractAddress,
+                  wallet.address
+                ) ?? quote.buyAmount,
+              usdValue: usd
+            }
           ]
         });
         await tx.orderLeg.update({ where: { id: leg.id }, data: { status: "FILLED" } });

@@ -18,7 +18,9 @@ import {
 import { useAuth } from "@/components/auth-provider";
 import { useAuthedFetch } from "@/components/use-authed-fetch";
 import { Button } from "@/components/ui/button";
-import { Composer } from "@/components/social/composer";
+import { Composer, SkyComposer } from "@/components/social/composer";
+import { ComposeChooser } from "@/components/social/compose-chooser";
+import { SkyThesis } from "@/components/social/sky-thesis";
 import { type StreamItem } from "@/components/social/research-stream";
 import { HoldingRow } from "@/components/data/holding-row";
 import { AllocationBar } from "@/components/data/allocation-bar";
@@ -30,6 +32,7 @@ import { OrbitField } from "@/components/research/orbit-field";
 import { ResearchLiveLog } from "@/components/research/live-log";
 import { ApiError } from "@/lib/api";
 import { API_ORIGIN } from "@/lib/fmt";
+import { useWorld } from "@/lib/world";
 
 type Holding = { tokenId: string; symbol: string; weightBps: number; rationale?: string; role?: string };
 
@@ -68,10 +71,20 @@ const STAGES = [
   }
 ];
 
-const HINTS = [
+const STOCK_HINTS = [
   "Diseases are going to increase.",
   "The future of travel is closer than we think.",
   "The world will need a lot more electricity."
+];
+const MEME_HINTS = [
+  "Dogs still run the timeline.",
+  "Launchpads mint a new culture coin every night.",
+  "Frogs and cats keep winning attention."
+];
+const SKY_HINTS = [
+  "Saturn transits the 10th. Labor stays expensive.",
+  "Mars enters Scorpio. Saturn aspects the 10th.",
+  "Sun ingresses Capricorn. Jupiter-Saturn still tight."
 ];
 const PAPER_PRESETS = [100, 250, 500, 1000];
 
@@ -103,6 +116,12 @@ export default function ComposeForm() {
   const { getHeaders } = useAuth();
   const reduce = useReducedMotion();
   const fork = useSearchParams().get("fork");
+  const lensParam = useSearchParams().get("lens");
+  const { world, setWorld, chainId, setChainId } = useWorld();
+  const [lens, setLens] = useState<"BELIEF" | "SKY">(lensParam === "sky" ? "SKY" : "BELIEF");
+  const [astrologySystem, setAstrologySystem] = useState<"VEDIC" | "WESTERN">("VEDIC");
+  const [chart, setChart] = useState("");
+  const hints = lens === "SKY" ? SKY_HINTS : world === "MEMES" ? MEME_HINTS : STOCK_HINTS;
   const [sentence, setSentence] = useState("");
   const [takeId, setTakeId] = useState("");
   const [runId, setRunId] = useState("");
@@ -110,6 +129,7 @@ export default function ComposeForm() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [thesis, setThesis] = useState("");
   const [error, setError] = useState("");
+  const [suggestWorld, setSuggestWorld] = useState<"STOCKS" | "MEMES" | null>(null);
   const [busy, setBusy] = useState(false);
   const [amount, setAmount] = useState("250");
   const [reveal, setReveal] = useState(false);
@@ -118,6 +138,10 @@ export default function ComposeForm() {
   const [wantReal, setWantReal] = useState(false);
   const [liveOk, setLiveOk] = useState(false);
   const typeTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (lensParam === "sky") setLens("SKY");
+  }, [lensParam]);
 
   useEffect(() => {
     fetchApi<{ liveEnabled?: boolean; wallet?: { id?: string } }>("/v1/wallet")
@@ -132,8 +156,16 @@ export default function ComposeForm() {
 
   useEffect(() => {
     if (!fork) return;
-    fetchApi<{ take: { revisions?: Array<{ sentence: string }> } }>(`/v1/takes/${fork}`)
-      .then((d) => setSentence(d.take?.revisions?.[0]?.sentence ?? ""))
+    fetchApi<{ take: { lens?: string; astrologySystem?: string; revisions?: Array<{ sentence: string; astrologyChart?: string | null }> } }>(`/v1/takes/${fork}`)
+      .then((d) => {
+        const r = d.take?.revisions?.[0];
+        setSentence(r?.sentence ?? "");
+        if (d.take?.lens === "SKY" || r?.astrologyChart) {
+          setLens("SKY");
+          setChart(r?.astrologyChart ?? "");
+          if (d.take?.astrologySystem === "WESTERN") setAstrologySystem("WESTERN");
+        }
+      })
       .catch(() => {});
   }, [fetchApi, fork]);
 
@@ -150,15 +182,16 @@ export default function ComposeForm() {
 
   function typeInto(full: string) {
     if (typeTimer.current) window.clearInterval(typeTimer.current);
+    const set = lens === "SKY" ? setChart : setSentence;
     if (reduce) {
-      setSentence(full);
+      set(full);
       return;
     }
     let i = 0;
-    setSentence("");
+    set("");
     typeTimer.current = window.setInterval(() => {
       i += 2;
-      setSentence(full.slice(0, i));
+      set(full.slice(0, i));
       if (i >= full.length && typeTimer.current) {
         window.clearInterval(typeTimer.current);
         typeTimer.current = null;
@@ -172,11 +205,19 @@ export default function ComposeForm() {
     setEvents([]);
     setHoldings([]);
     setStep("basket");
-    sessionStorage.setItem("superview-draft", sentence);
+    sessionStorage.setItem("superview-draft", lens === "SKY" ? chart : sentence);
     try {
       const started = await fetchApi<{ takeId: string; runId: string }>("/v1/research", {
         method: "POST",
-        body: JSON.stringify({ sentence })
+        body: JSON.stringify({
+          sentence,
+          world,
+          chainId,
+          parentTakeId: fork || undefined,
+          lens,
+          astrologySystem: lens === "SKY" ? astrologySystem : undefined,
+          chart: lens === "SKY" ? chart : undefined
+        })
       });
       setTakeId(started.takeId);
       setRunId(started.runId);
@@ -196,10 +237,11 @@ export default function ComposeForm() {
           const line = chunk.split("\n").find((l) => l.startsWith("data: "));
           if (!line) continue;
           try {
-            const ev = JSON.parse(line.slice(6)) as StreamItem & { status?: string; payload?: { holdings?: Holding[]; thesis?: string } };
+            const ev = JSON.parse(line.slice(6)) as StreamItem & { status?: string; payload?: { holdings?: Holding[]; thesis?: string; suggestWorld?: "STOCKS" | "MEMES" } };
             setEvents((prev) => [...prev, { stage: ev.stage, message: ev.message }]);
             if (ev.payload?.holdings) setHoldings(ev.payload.holdings);
             if (ev.payload?.thesis) setThesis(String(ev.payload.thesis));
+            if (ev.payload?.suggestWorld && ev.payload.suggestWorld !== world) setSuggestWorld(ev.payload.suggestWorld);
             if (ev.stage === "done" || ev.stage === "draft" || ev.stage === "refuse" || ev.stage === "failed") {
               if (ev.stage === "refuse" || ev.stage === "failed") setError(ev.message || "Couldn’t research that view.");
             }
@@ -297,10 +339,12 @@ export default function ComposeForm() {
             </button>
           </div>
           <div className="flex min-h-0 flex-1 items-start justify-end pt-8 md:pt-14">
-            <ResearchLiveLog events={events} />
+            <ResearchLiveLog events={events} world={world} chainId={chainId} />
           </div>
           <div className="glass-night flex items-center gap-4 rounded-2xl px-5 py-4 md:gap-6">
-            <p className="min-w-0 flex-1 truncate text-[15px] font-medium text-white/90">“{sentence.trim()}”</p>
+            <p className="min-w-0 flex-1 truncate text-[15px] font-medium text-white/90">
+              “{(lens === "SKY" ? chart || sentence : sentence).trim()}”
+            </p>
             <div className="hidden h-1 w-40 overflow-hidden rounded-full bg-white/10 sm:block">
               <div className="h-full rounded-full bg-lagoon transition-all duration-300" style={{ width: `${Math.min(shown, 4) / 4 * 100}%` }} />
             </div>
@@ -338,8 +382,18 @@ export default function ComposeForm() {
             <AgentOrb size={16} />
             Research complete
           </p>
-          <h1 className="view mt-5 text-[22px] font-medium leading-snug tracking-[-0.02em] text-ink md:text-[28px]">“{sentence.trim()}”</h1>
-          {thesis ? <p className="mt-3 text-[15px] text-muted">{thesis}</p> : null}
+          {lens === "SKY" ? (
+            <SkyThesis
+              size="page"
+              chart={chart}
+              prediction={sentence.trim() || thesis || "Untitled view"}
+            />
+          ) : (
+            <>
+              <h1 className="view mt-5 text-[22px] font-medium leading-snug tracking-[-0.02em] text-ink md:text-[28px]">“{sentence.trim()}”</h1>
+              {thesis ? <p className="mt-3 text-[15px] text-muted">{thesis}</p> : null}
+            </>
+          )}
           {error ? (
             <div className="mt-6">
               <Notice tone="warn">{error}</Notice>
@@ -350,7 +404,7 @@ export default function ComposeForm() {
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="display text-[20px] text-ink">Your basket</h2>
               <p className="text-[13px] text-muted">
-                <span className="font-mono">{holdings.length}</span> companies
+                <span className="font-mono">{holdings.length}</span> {world === "MEMES" ? "coins" : "companies"}
               </p>
             </div>
             <div className="mt-6">
@@ -366,11 +420,16 @@ export default function ComposeForm() {
                   role={h.role}
                   takeId={takeId}
                   whyInBasket={h.rationale}
+                  chainId={chainId}
                 />
               ))}
             </div>
           </section>
-          <p className="mt-6 text-[13px] text-muted">Weights and performance are illustrative. Stock tokens are economic exposure, not share ownership.</p>
+          <p className="mt-6 text-[13px] text-muted">
+            {world === "MEMES"
+              ? "Memes can go to zero. Liquidity can vanish. This is not investment advice."
+              : "Weights and performance are illustrative. Stock tokens are economic exposure, not share ownership."}
+          </p>
 
           {step === "invest" ? (
             <section className="mt-12">
@@ -508,7 +567,9 @@ export default function ComposeForm() {
               <p className="mt-2 text-[15px] text-muted">
                 <span className="font-mono text-ink">{formatMoney(invested.usd)}</span> of paper money is now tracking
               </p>
-              <p className="mt-4 text-[16px] font-medium leading-snug text-ink">“{sentence.trim()}”</p>
+              <p className="mt-4 text-[16px] font-medium leading-snug text-ink">
+                “{(sentence.trim() || chart.trim() || "this sky")}”
+              </p>
               <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[12px] font-medium text-ink">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal" />
                 Paper · no real money
@@ -540,12 +601,58 @@ export default function ComposeForm() {
         }
       />
       <main id="main" className="mx-auto w-full max-w-[760px] px-5 pb-20 pt-8 md:pt-16">
-        <h1 className="display text-[28px] text-ink md:text-[40px]">What’s your view on the world?</h1>
+        <h1 className="display text-[28px] text-ink md:text-[40px]">
+          {lens === "SKY" ? "What’s in the sky?" : "What’s your view on the world?"}
+        </h1>
         <p className="mt-3 text-[15px] text-muted">
-          {fork ? "Starting from another view. Make it yours." : "Write it in one sentence. The agent will find the companies it touches."}
+          {fork
+            ? "Starting from another view. Make it yours."
+            : lens === "SKY"
+              ? "Write the transits, dashas, or ingresses. The agent reads Vedic or Western canon, predicts market themes, then builds a basket from this desk."
+              : world === "MEMES"
+                ? "Write it in one sentence. The agent will find launchpad coins that fit. Memes are high risk and can go to zero."
+                : "Write it in one sentence. The agent will find the companies it touches."}
         </p>
+        <ComposeChooser
+          lens={lens}
+          world={world}
+          chainId={chainId}
+          system={astrologySystem}
+          onLens={setLens}
+          onWorld={setWorld}
+          onChain={setChainId}
+          onSystem={setAstrologySystem}
+        />
+        {suggestWorld ? (
+          <div className="mt-4">
+            <Notice tone="warn">
+              This reads like a {suggestWorld === "MEMES" ? "launchpad" : "stocks"} view.{" "}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => {
+                  setWorld(suggestWorld);
+                  setSuggestWorld(null);
+                }}
+              >
+                Switch to {suggestWorld === "MEMES" ? "Memes" : "Stocks"}
+              </button>
+            </Notice>
+          </div>
+        ) : null}
         <div className="mt-10">
-          <Composer value={sentence} onChange={setSentence} onSubmit={() => void research()} busy={busy} autoFocus />
+          {lens === "SKY" ? (
+            <SkyComposer
+              chart={chart}
+              headline={sentence}
+              onChart={setChart}
+              onHeadline={setSentence}
+              onSubmit={() => void research()}
+              busy={busy}
+            />
+          ) : (
+            <Composer value={sentence} onChange={setSentence} onSubmit={() => void research()} busy={busy} autoFocus />
+          )}
         </div>
         {error ? (
           <div className="mt-4">
@@ -555,7 +662,7 @@ export default function ComposeForm() {
         <section className="mt-12">
           <h2 className="text-[13px] font-medium text-ink">A little inspiration</h2>
           <div className="mt-4 flex flex-wrap gap-2">
-            {HINTS.map((ex) => (
+            {hints.map((ex) => (
               <button
                 key={ex}
                 type="button"

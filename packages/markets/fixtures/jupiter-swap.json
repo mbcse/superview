@@ -1,0 +1,13 @@
+{
+  "inAmount": "10000000",
+  "outAmount": "41200000",
+  "priceImpactPct": "0.18",
+  "routePlan": [
+    {
+      "swapInfo": {
+        "label": "Raydium",
+        "ammKey": "amm"
+      }
+    }
+  ]
+}

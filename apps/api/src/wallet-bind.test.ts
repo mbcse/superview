@@ -32,6 +32,12 @@ describe("live grants", () => {
     assert.deepEqual(contracts, [usdg.toLowerCase()]);
   });
 
+  it("accepts the shaped grant while keeping string[]", () => {
+    assert.equal(grantAllows({ chainId: 4663, kind: "erc20", ids: [usdg] }, usdg, 4663), true);
+    assert.equal(grantAllows({ chainId: 101, kind: "mint", ids: [usdg] }, usdg, 4663), false);
+    assert.equal(grantAllows([usdg], usdg), true);
+  });
+
   it("intersects requested contracts with the env allowlist", () => {
     const extra = "0x0000000000001ff3684f28c67538d4d92c4650cf";
     const contracts = liveGrantContracts([extra, "0x2222222222222222222222222222222222222222"], extra, usdg);

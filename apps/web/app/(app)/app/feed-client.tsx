@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryState } from "nuqs";
 import { ArrowRight } from "@phosphor-icons/react";
 import { ComposerEntry } from "@/components/social/composer";
@@ -11,7 +11,9 @@ import { useAuthedFetch } from "@/components/use-authed-fetch";
 import { useAuth } from "@/components/auth-provider";
 import { useRouter } from "next/navigation";
 import { InvestDialog } from "@/components/social/invest-dialog";
+import { SegmentedTabs } from "@/components/data/segmented-tabs";
 import { cn } from "@/lib/cn";
+import { useWorld } from "@/lib/world";
 
 const TABS = ["For you", "Following", "Trending"] as const;
 const TAB_API: Record<(typeof TABS)[number], string> = {
@@ -37,25 +39,45 @@ export default function FeedClient({ initial }: { initial: FeedTake[] }) {
   const { displayName } = useAuth();
   const router = useRouter();
   const [q] = useQueryState("q", { defaultValue: "" });
+  const { world, setWorld } = useWorld();
   const [tab, setTab] = useState<(typeof TABS)[number]>("For you");
   const [takes, setTakes] = useState(initial);
+  const cache = useRef<Partial<Record<"STOCKS" | "MEMES", FeedTake[]>>>({});
   const [investTake, setInvestTake] = useState<FeedTake | null>(null);
   const firstName = (displayName ?? "").trim().split(/\s+/)[0];
 
   useEffect(() => {
+    for (const t of initial) {
+      const w = t.world === "MEMES" ? "MEMES" : "STOCKS";
+      const bucket = cache.current[w] ?? [];
+      if (!bucket.some((row) => row.id === t.id)) bucket.push(t);
+      cache.current[w] = bucket;
+    }
+  }, [initial]);
+
+  useEffect(() => {
+    const cached = cache.current[world];
+    if (cached) setTakes(cached);
     const query = q.trim() ? `&q=${encodeURIComponent(q.trim())}` : "";
-    fetchApi<{ takes: FeedTake[] }>(`/v1/feed?tab=${TAB_API[tab]}${query}`)
-      .then((d) => setTakes(d.takes ?? []))
-      .catch(() => {});
-  }, [fetchApi, tab, q]);
+    fetchApi<{ takes: FeedTake[] }>(`/v1/feed?tab=${TAB_API[tab]}&world=${world}${query}`)
+      .then((d) => {
+        const next = d.takes ?? [];
+        cache.current[world] = next;
+        setTakes(next);
+      })
+      .catch(() => {
+        setTakes(cache.current[world] ?? []);
+      });
+  }, [fetchApi, tab, q, world]);
 
   const visible = useMemo(() => {
     const query = q.toLowerCase();
     return takes.filter((t) => {
+      if ((t.world ?? "STOCKS") !== world) return false;
       if (!query) return true;
       return `${t.sentence ?? ""} ${t.author} ${t.holdings.map((h) => h.symbol).join(" ")}`.toLowerCase().includes(query);
     });
-  }, [takes, q]);
+  }, [takes, q, world]);
 
   function followChanged(authorId: string, following: boolean) {
     setTakes((rows) => {
@@ -76,6 +98,15 @@ export default function FeedClient({ initial }: { initial: FeedTake[] }) {
 
   return (
     <div className="mx-auto w-full max-w-[600px]">
+      <div className="mb-4">
+        <SegmentedTabs
+          grow
+          layoutId="feed-world"
+          options={["Stocks", "Memes"]}
+          value={world === "MEMES" ? "Memes" : "Stocks"}
+          onChange={(v) => setWorld(v === "Memes" ? "MEMES" : "STOCKS")}
+        />
+      </div>
       <h1 className="text-[20px] font-semibold tracking-[-0.02em] text-ink">
         {firstName ? `${greeting()}, ${firstName}` : greeting()}
       </h1>
@@ -131,7 +162,13 @@ export default function FeedClient({ initial }: { initial: FeedTake[] }) {
           }
         />
       )}
-      <InvestDialog takeId={investTake?.id ?? null} sentence={investTake?.sentence} onClose={() => setInvestTake(null)} />
+      <InvestDialog
+        takeId={investTake?.id ?? null}
+        sentence={investTake?.sentence}
+        chainId={investTake?.chainId}
+        world={investTake?.world}
+        onClose={() => setInvestTake(null)}
+      />
     </div>
   );
 }

@@ -8,13 +8,13 @@ import { ThesisHealth } from "@/components/social/thesis-health";
 import { useLiveQuote } from "@/components/social/price-stream";
 import { useStockSheet } from "@/components/social/stock-sheet";
 import { CommentsButton, useViewComments } from "@/components/social/view-chat";
-import { fmtAgo, fmtPooled, tick } from "@/lib/fmt";
+import { fmtAgo, fmtPooled } from "@/lib/fmt";
+import { TokenMark, stockTick } from "@/components/data/token-mark";
 import { fmtVsLabel, useLiveVsSpy } from "@/lib/live-vs";
 import { TickValue } from "@/components/data/tick-value";
 import { LivePrice } from "@/components/social/live-price";
 import { FollowButton } from "@/components/social/follow-button";
-
-const CHIP = ["mint", "blue", "rose", "amber"] as const;
+import { SkyThesis } from "@/components/social/sky-thesis";
 
 export type FeedTake = {
   id: string;
@@ -24,8 +24,10 @@ export type FeedTake = {
   avatar?: string | null;
   handle?: string | null;
   createdAt?: string;
-  holdings: Array<{ symbol: string; weightBps: number; last?: number | null; publish?: number | null; chgPct?: number | null; logoUrl?: string | null; rationale?: string | null }>;
+  holdings: Array<{ tokenId?: string; symbol: string; weightBps: number; last?: number | null; publish?: number | null; chgPct?: number | null; logoUrl?: string | null; rationale?: string | null }>;
   vsSpy: number | null;
+  world?: "STOCKS" | "MEMES";
+  chainId?: number;
   spyPublish?: number | null;
   benchmarkIndex?: number | null;
   backers?: number;
@@ -40,15 +42,14 @@ export type FeedTake = {
   following?: boolean;
   mine?: boolean;
   seeded?: boolean;
+  lens?: "BELIEF" | "SKY";
+  astrologySystem?: "VEDIC" | "WESTERN" | null;
+  astrologyChart?: string | null;
 };
 
 function initialsOf(name?: string | null) {
   const parts = (name ?? "?").trim().split(/\s+/);
   return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
-}
-
-function tint(i: number): (typeof CHIP)[number] {
-  return CHIP[i % CHIP.length] ?? "mint";
 }
 
 function handleOf(take: FeedTake) {
@@ -127,6 +128,14 @@ export function TakeCard({
               <span className="size-1.5 rounded-full bg-teal" />
               Agent watching
             </span>
+            {take.lens === "SKY" ? (
+              <>
+                <span aria-hidden>·</span>
+                <span className="inline-flex items-center rounded-full bg-mist px-2 py-0.5 text-[11px] font-medium text-ink">
+                  Astrology{take.astrologySystem === "VEDIC" ? " · Vedic" : take.astrologySystem === "WESTERN" ? " · Western" : ""}
+                </span>
+              </>
+            ) : null}
           </p>
         </div>
         {take.authorId && !take.mine ? (
@@ -138,14 +147,18 @@ export function TakeCard({
         ) : null}
       </div>
 
-      <p className="view mt-3.5 text-[17px] font-medium leading-[1.35] tracking-[-0.02em] text-ink">
-        {take.sentence ?? "Untitled view"}
-      </p>
+      {take.lens === "SKY" ? (
+        <SkyThesis chart={take.astrologyChart} prediction={take.sentence} />
+      ) : (
+        <p className="view mt-3.5 text-[17px] font-medium leading-[1.35] tracking-[-0.02em] text-ink">
+          {take.sentence ?? "Untitled view"}
+        </p>
+      )}
 
       <div className="mt-3.5 overflow-hidden rounded-xl border border-teal/10 bg-white/45">
         <div className="flex items-end justify-between gap-3 px-3 py-3">
           <div>
-            <p className="text-[11px] font-medium text-muted">vs S&P 500</p>
+            <p className="text-[11px] font-medium text-muted">{take.world === "MEMES" ? "vs SOL" : "vs S&P 500"}</p>
             <div className="mt-1 flex items-baseline gap-2">
               <TickValue
                 value={vs}
@@ -163,11 +176,11 @@ export function TakeCard({
               {take.seeded ? "Live quotes · seeded path is illustrative" : "Live"}
             </p>
           </div>
-          {take.spark && take.spark.length > 1 ? <Spark values={take.spark} label="vs S&P 500" /> : null}
+          {take.spark && take.spark.length > 1 ? <Spark values={take.spark} label={take.world === "MEMES" ? "vs SOL" : "vs S&P 500"} /> : null}
         </div>
         <div className="flex gap-1.5 overflow-x-auto border-t border-teal/10 px-2 py-2 hide-scroll">
-          {take.holdings.map((h, i) => (
-            <HoldingChip key={h.symbol} holding={h} tint={tint(i)} takeId={take.id} />
+          {take.holdings.map((h) => (
+            <HoldingChip key={h.symbol} holding={h} takeId={take.id} chainId={take.chainId} />
           ))}
         </div>
         <Link
@@ -248,24 +261,16 @@ export function TakeCard({
 
 function HoldingChip({
   holding,
-  tint,
-  takeId
+  takeId,
+  chainId
 }: {
   holding: FeedTake["holdings"][number];
-  tint: (typeof CHIP)[number];
   takeId: string;
+  chainId?: number;
 }) {
-  const q = useLiveQuote(holding.symbol);
+  const q = useLiveQuote(holding.symbol, holding.tokenId);
   const { openStock } = useStockSheet();
   const last = q?.last ?? holding.last;
-  const mark =
-    tint === "mint"
-      ? "bg-positive-soft text-up"
-      : tint === "rose"
-        ? "bg-mist text-teal"
-        : tint === "blue"
-          ? "bg-accent text-ink"
-          : "bg-mist text-ink";
   return (
     <button
       type="button"
@@ -274,20 +279,14 @@ function HoldingChip({
           takeId,
           rationale: holding.rationale,
           weightBps: holding.weightBps,
-          whyInBasket: holding.rationale
+          whyInBasket: holding.rationale,
+          chainId
         })
       }
       className="flex shrink-0 items-center gap-1.5 rounded-lg border border-teal/12 bg-white/70 py-1 pl-1 pr-2 text-left hover:border-teal/35"
     >
-      {holding.logoUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={holding.logoUrl} alt="" className="size-6 rounded-md object-cover" />
-      ) : (
-        <span className={`inline-flex size-6 shrink-0 items-center justify-center rounded-md text-[9px] font-bold ${mark}`}>
-          {tick(holding.symbol).slice(0, 2)}
-        </span>
-      )}
-      <span className="text-[12px] font-semibold">{tick(holding.symbol)}</span>
+      <TokenMark symbol={holding.symbol} logoUrl={holding.logoUrl} chainId={chainId} size={24} />
+      <span className="text-[12px] font-semibold">{stockTick(holding.symbol, chainId)}</span>
       {last != null ? (
         <LivePrice last={last} chgPct={q?.chgPct} pulse={q?.seq} className="px-0 text-[11px]" />
       ) : null}

@@ -44,7 +44,8 @@ function PostHogPageView() {
     let url = window.origin + pathname;
     const q = searchParams.toString();
     if (q) url += `?${q}`;
-    ph.capture("$pageview", { $current_url: url });
+    const world = searchParams.get("world") === "MEMES" ? "MEMES" : "STOCKS";
+    ph.capture("$pageview", { $current_url: url, world, chainId: world === "MEMES" ? 101 : 4663 });
   }, [pathname, searchParams, ph]);
 
   return null;

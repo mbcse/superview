@@ -1,5 +1,5 @@
 import { generateText, stepCountIs } from "ai";
-import { log, logError } from "@takeandstake/shared";
+import { displaySymbol, log, logError } from "@takeandstake/shared";
 import { hasOpenAI, modelIdOf, researchResponsesModel, webSearchTool } from "./llm.js";
 import { fill, WEB_DILIGENCE_PROMPT, WEB_DISCOVER_PROMPT, WEB_NEWS_PROMPT } from "./prompts/index.js";
 
@@ -16,7 +16,7 @@ export function parseDiligenceNotes(text: string, symbols: string[]): Record<str
   const wanted = new Map<string, string>();
   for (const s of symbols) {
     wanted.set(s.toUpperCase(), s);
-    wanted.set(s.replace(/^RH/i, "").toUpperCase(), s);
+    wanted.set(displaySymbol(s).toUpperCase(), s);
   }
   const out: Record<string, string> = {};
 
@@ -26,7 +26,7 @@ export function parseDiligenceNotes(text: string, symbols: string[]): Record<str
     try {
       const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1)) as Record<string, unknown>;
       for (const [k, v] of Object.entries(parsed)) {
-        const canon = wanted.get(k.toUpperCase()) ?? wanted.get(k.replace(/^RH/i, "").toUpperCase());
+        const canon = wanted.get(k.toUpperCase()) ?? wanted.get(displaySymbol(k).toUpperCase());
         if (!canon) continue;
         if (typeof v === "string" && v.trim()) out[canon] = v.trim().slice(0, 4000);
         else if (v && typeof v === "object") out[canon] = JSON.stringify(v).slice(0, 4000);
@@ -38,7 +38,7 @@ export function parseDiligenceNotes(text: string, symbols: string[]): Record<str
   }
 
   const matchWanted = (raw: string) =>
-    wanted.get(raw.toUpperCase()) ?? wanted.get(raw.replace(/^RH/i, "").toUpperCase());
+    wanted.get(raw.toUpperCase()) ?? wanted.get(displaySymbol(raw).toUpperCase());
 
   const lines = text.split(/\r?\n/);
   let current: string | null = null;

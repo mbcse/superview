@@ -35,7 +35,7 @@ export function OrbitField({ tickers }: OrbitFieldProps) {
             >
               <span className="absolute left-1/2 top-0 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-aqua shadow-[0_0_10px_2px_rgb(46_196_182/0.7)]" />
-                <span className="font-mono text-[10px] text-white/60">{ticker.replace(/^RH/, "")}</span>
+                <span className="font-mono text-[10px] text-white/60">{ticker}</span>
               </span>
             </div>
           ))}

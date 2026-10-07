@@ -37,7 +37,10 @@ export function Providers({ children }: { children: ReactNode }) {
       appId={privyAppId}
       config={{
         appearance: { theme: "light", accentColor: "#0E8F8F" },
-        embeddedWallets: { ethereum: { createOnLogin: "users-without-wallets" } },
+        embeddedWallets: {
+          ethereum: { createOnLogin: "users-without-wallets" },
+          solana: { createOnLogin: "users-without-wallets" }
+        },
         loginMethods: ["email", "wallet", "google"]
       }}
     >

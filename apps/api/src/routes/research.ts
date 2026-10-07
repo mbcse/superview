@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { Queue } from "bullmq";
 import { prisma } from "@takeandstake/db";
-import { takeSentenceSchema, log } from "@takeandstake/shared";
+import { takeSentenceSchema, log, parseChainId, parseWorld, deskOf } from "@takeandstake/shared";
 import { loadEnv } from "@takeandstake/config";
 import { requireAuth, requireTakeAuthor } from "../middleware/auth.js";
 import { createRedis, dropRedis, redis } from "../redis.js";
+import { hitRateLimit, LIMIT_RESEARCH } from "../rate-limit.js";
 import { portfolioFromRun, withDraftPayload } from "../services/portfolio-from-run.js";
 
 const researchQueue = new Queue("research", { connection: redis });
@@ -18,29 +19,82 @@ function isAdmin(req: { header: (n: string) => string | undefined }) {
 export const researchRouter = Router();
 
 researchRouter.post("/v1/research", requireAuth, async (req, res) => {
+  if (!(await hitRateLimit(redis, `research:${req.user!.id}`, LIMIT_RESEARCH.max, LIMIT_RESEARCH.windowMs))) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
   const parsed = takeSentenceSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const take = await prisma.take.create({ data: { authorId: req.user!.id, status: "DRAFT" } });
+  const world = parseWorld(parsed.data.world);
+  const chainId = parseChainId(parsed.data.chainId, world);
+  const desk = deskOf(world, chainId);
+  if (!desk) return res.status(400).json({ error: "bad_desk" });
+  const lens = parsed.data.lens === "SKY" ? "SKY" : "BELIEF";
+  const chart = (parsed.data.chart ?? "").trim() || undefined;
+  const astrologySystem = lens === "SKY" ? parsed.data.astrologySystem === "VEDIC" ? "VEDIC" : "WESTERN" : undefined;
+  const sentence =
+    (parsed.data.sentence ?? "").trim() ||
+    (chart ? chart.split(/\n/).map((l) => l.trim()).find(Boolean)?.slice(0, 220) ?? "Sky view" : "");
+  const parentTakeId = parsed.data.parentTakeId;
+  if (parentTakeId) {
+    const parent = await prisma.take.findUnique({ where: { id: parentTakeId } });
+    if (parent && (parent.world !== world || parent.chainId !== chainId)) {
+      return res.status(400).json({ error: "desk_mismatch" });
+    }
+  }
+  const take = await prisma.take.create({
+    data: {
+      authorId: req.user!.id,
+      status: "DRAFT",
+      world,
+      chainId,
+      lens,
+      astrologySystem,
+      parentTakeId: parentTakeId || undefined
+    }
+  });
+  if (parentTakeId) {
+    await prisma.takeLink.create({
+      data: { fromTakeId: take.id, toTakeId: parentTakeId, type: "FORK", deltaText: sentence }
+    }).catch(() => {});
+  }
   await prisma.takeRevision.create({
     data: {
       takeId: take.id,
       number: 1,
-      sentence: parsed.data.sentence,
+      sentence,
+      astrologyChart: chart,
       origin: "AUTHOR"
     }
   });
-  const prior = await prisma.thesisSpec.findFirst({
-    where: { normalizedTake: { equals: parsed.data.sentence, mode: "insensitive" }, refuse: false },
-    include: { run: { include: { events: { orderBy: { createdAt: "desc" }, take: 8 } } } }
-  });
+  const prior =
+    lens === "SKY"
+      ? null
+      : await prisma.thesisSpec.findFirst({
+          where: {
+            normalizedTake: { equals: sentence, mode: "insensitive" },
+            refuse: false,
+            run: { world, chainId }
+          },
+          include: { run: { include: { events: { orderBy: { createdAt: "desc" }, take: 8 } } } }
+        });
   const reusable =
     prior?.run && (prior.run.status === "DRAFT" || prior.run.status === "DEEP_DONE") ? prior.run : null;
   const run = await prisma.researchRun.create({
     data: {
       takeId: take.id,
+      world,
+      chainId,
       status: reusable ? "DRAFT" : "PENDING",
       stage: reusable ? "draft" : "queued",
-      modelVersions: reusable?.modelVersions ?? { view: parsed.data.sentence },
+      modelVersions: reusable?.modelVersions ?? {
+        view: sentence,
+        world,
+        chainId,
+        lens,
+        astrologySystem,
+        chart,
+        skyHeadlineProvided: Boolean((parsed.data.sentence ?? "").trim())
+      },
       finishedAt: reusable ? new Date() : undefined
     }
   });
@@ -69,7 +123,7 @@ researchRouter.post("/v1/research", requireAuth, async (req, res) => {
         }
       });
     }
-    log("api", "research reused", { run: run.id, view: parsed.data.sentence });
+    log("api", "research reused", { run: run.id, view: sentence });
     return res.json({ takeId: take.id, runId: run.id, status: run.status, reused: true });
   }
   await prisma.researchEvent.create({
@@ -80,7 +134,7 @@ researchRouter.post("/v1/research", requireAuth, async (req, res) => {
     attempts: 6,
     backoff: { type: "exponential", delay: 15_000 }
   });
-  log("api", "research queued", { run: run.id, view: parsed.data.sentence });
+  log("api", "research queued", { run: run.id, view: sentence, lens });
   res.json({ takeId: take.id, runId: run.id, status: run.status });
 });
 

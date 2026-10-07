@@ -7,15 +7,18 @@ export function MarketingChrome() {
     <header className="sticky top-0 z-30 px-3 pt-3 md:px-6">
       <div className="glass-chrome mx-auto flex h-14 max-w-[1320px] items-center justify-between rounded-2xl px-4 md:px-5">
         <Wordmark />
-        <nav className="hidden items-center gap-6 text-[14px] lg:flex" aria-label="Product">
+        <nav className="hidden items-center gap-5 text-[14px] lg:flex" aria-label="Product">
           <HashLink className="text-muted hover:text-ink" href="/#how">
             How it works
           </HashLink>
           <HashLink className="text-muted hover:text-ink" href="/#tokens">
             Stock tokens
           </HashLink>
-          <HashLink className="text-muted hover:text-ink" href="/#score">
-            vs S&P
+          <HashLink className="text-muted hover:text-ink" href="/#memes">
+            Memes
+          </HashLink>
+          <HashLink className="text-muted hover:text-ink" href="/#astrology">
+            Astrology
           </HashLink>
           <Link className="text-muted hover:text-ink" href="/explore">
             Trending

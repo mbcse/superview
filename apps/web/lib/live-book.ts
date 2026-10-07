@@ -1,5 +1,6 @@
 export type VsHolding = {
   symbol: string;
+  tokenId?: string;
   weightBps: number;
   last?: number | null;
   publish?: number | null;
@@ -9,9 +10,13 @@ export type Quote = { last?: number | null; tokenLast?: number | null; chgPct?: 
 
 const SINCE_EPS = 1e-4;
 
-function quoteOf(quotes: Record<string, Quote>, symbol: string) {
+function quoteOf(quotes: Record<string, Quote>, symbol: string, tokenId?: string | null) {
+  if (tokenId) {
+    const hit = quotes[tokenId] ?? quotes[tokenId.toUpperCase()];
+    if (hit) return hit;
+  }
   const u = symbol.toUpperCase();
-  const bare = u.replace(/^RH/, "");
+  const bare = u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
   return quotes[u] ?? quotes[`RH${bare}`] ?? quotes[bare] ?? null;
 }
 
@@ -43,7 +48,7 @@ export function liveVsSpy(
   let acc = 0;
   let w = 0;
   for (const h of holdings) {
-    const q = quoteOf(quotes, h.symbol);
+    const q = quoteOf(quotes, h.symbol, h.tokenId);
     const last = finite(q?.last) ?? finite(h.last);
     const publish = asSharePrice(h.publish, last, q?.tokenLast);
     if (last == null || publish == null || publish <= 0) continue;
@@ -69,7 +74,7 @@ function dayVsSpy(holdings: VsHolding[], quotes: Record<string, Quote>) {
   let acc = 0;
   let w = 0;
   for (const h of holdings) {
-    const pct = finite(quoteOf(quotes, h.symbol)?.chgPct);
+    const pct = finite(quoteOf(quotes, h.symbol, h.tokenId)?.chgPct);
     if (pct == null) continue;
     acc += (h.weightBps / 10_000) * pct;
     w += h.weightBps / 10_000;
@@ -80,7 +85,7 @@ function dayVsSpy(holdings: VsHolding[], quotes: Record<string, Quote>) {
 }
 
 export function holdingSince(h: VsHolding, quotes: Record<string, Quote>) {
-  const q = quoteOf(quotes, h.symbol);
+  const q = quoteOf(quotes, h.symbol, h.tokenId);
   const last = finite(q?.last) ?? finite(h.last);
   const publish = asSharePrice(h.publish, last, q?.tokenLast);
   if (last == null || publish == null || publish <= 0) return null;
@@ -89,7 +94,7 @@ export function holdingSince(h: VsHolding, quotes: Record<string, Quote>) {
 
 export function holdingReturn(h: VsHolding, quotes: Record<string, Quote>) {
   const since = holdingSince(h, quotes);
-  const day = finite(quoteOf(quotes, h.symbol)?.chgPct);
+  const day = finite(quoteOf(quotes, h.symbol, h.tokenId)?.chgPct);
   if (since != null && Math.abs(since) >= SINCE_EPS) return since;
   return day ?? since;
 }
@@ -101,7 +106,7 @@ export function liveBook(holdings: VsHolding[], quotes: Record<string, Quote>, i
   let sinceW = 0;
   let seq = 0;
   const legs = holdings.map((h) => {
-    const q = quoteOf(quotes, h.symbol);
+    const q = quoteOf(quotes, h.symbol, h.tokenId);
     const last = finite(q?.last) ?? finite(h.last);
     const day = finite(q?.chgPct);
     const since = holdingSince(h, quotes);

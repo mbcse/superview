@@ -14,6 +14,7 @@ import {
   syncRobinhoodCatalog,
   syncCorporateActions,
   QUOTES_CACHE_KEY,
+  QUOTES_ASSET_KEY,
   setPriceAliases,
   lookupPx,
   lastCashSessionStart,
@@ -21,6 +22,8 @@ import {
   prevCloseByTokens
 } from "@takeandstake/core";
 import { describeLlm, enrichStale, isRetryableError, replyToComment, runDailyMonitor, runResearchPipeline, writeManusMemo } from "@takeandstake/ai";
+import { quoteSolanaAssets, syncBagsCatalog, syncJupiterMemeCatalog, syncXStocksCatalog, refreshMemeRisk, setLimiterRedis, partitionHotSets, pushAlert, CORE_XSTOCKS } from "@takeandstake/markets";
+import { handleExecutionJob, reportProviderHealth } from "./execution.js";
 
 const env = loadEnv();
 function redisClient() {
@@ -30,6 +33,7 @@ function redisClient() {
 }
 const connection = redisClient();
 const pub = redisClient();
+setLimiterRedis(pub);
 const rpc = env.ALCHEMY_RPC_URL || env.ROBINHOOD_RPC_URL || env.ROBINHOOD_RPC_URLS;
 
 function isStaleLock(err: unknown) {
@@ -72,22 +76,55 @@ hushLocks(
   "catalog",
   new Worker(
     "catalog",
-    async () => {
+    async (job) => {
+      if (job.name === "risk-held") {
+        const risk = await refreshMemeRisk(true).catch((e) => {
+          logError("worker", "meme risk held", e);
+          return { n: 0 };
+        });
+        return { risk };
+      }
+      if (job.name === "risk-catalog") {
+        const risk = await refreshMemeRisk(false).catch((e) => {
+          logError("worker", "meme risk catalog", e);
+          return { n: 0 };
+        });
+        return { risk };
+      }
       const r = await syncRobinhoodCatalog();
+      const xstocks = await syncXStocksCatalog().catch((e) => {
+        logError("worker", "xstocks catalog", e);
+        return { count: 0 };
+      });
+      const bags = await syncBagsCatalog().catch((e) => {
+        logError("worker", "bags catalog", e);
+        return { count: 0 };
+      });
+      const memes = await syncJupiterMemeCatalog().catch((e) => {
+        logError("worker", "meme catalog", e);
+        return { count: 0 };
+      });
       const actions = await syncCorporateActions().catch((e) => {
         logError("worker", "corp actions", e);
         return { written: 0 };
       });
       const enrich = await enrichStale(12);
-      log("worker", "catalog", { ...r, actions, enrich });
-      return { ...r, actions, enrich };
+      await reportProviderHealth();
+      log("worker", "catalog", { ...r, xstocks, bags, memes, actions, enrich });
+      return { ...r, xstocks, bags, memes, actions, enrich };
     },
     { connection, lockDuration: 180_000 }
   )
 );
 
 let lastPersistAt = 0;
+let lastSolPersistAt = 0;
 let lastChainlinkAt = 0;
+let lastT1 = 0;
+let lastT2 = 0;
+let lastT3 = 0;
+let hotAt = 0;
+let cachedHot: ReturnType<typeof partitionHotSets> | null = null;
 let pricingBusy = false;
 const lastMids = new Map<string, number>();
 const lastTokens = new Map<string, number>();
@@ -116,6 +153,71 @@ function startOfNyDay(now = Date.now()) {
     else lo = mid;
   }
   return new Date(hi);
+}
+
+function tokenIdsFromTakes(rows: Array<{ revisions?: Array<{ target?: { holdings?: Array<{ tokenId: string }> | null } | null }> }>) {
+  return rows.flatMap((t) => t.revisions?.[0]?.target?.holdings?.map((h) => h.tokenId) ?? []);
+}
+
+async function loadHotSets() {
+  if (cachedHot && Date.now() - hotAt < 15_000) return cachedHot;
+  const [pockets, trending, published, coreX, xstocks, sse] = await Promise.all([
+    prisma.pocket.findMany({
+      where: { status: "ACTIVE" },
+      select: {
+        take: {
+          select: {
+            revisions: {
+              take: 1,
+              orderBy: { number: "desc" as const },
+              select: { target: { select: { holdings: { select: { tokenId: true } } } } }
+            }
+          }
+        }
+      }
+    }),
+    prisma.take.findMany({
+      where: { status: "PUBLISHED" },
+      take: 60,
+      orderBy: { createdAt: "desc" },
+      select: {
+        revisions: {
+          take: 1,
+          orderBy: { number: "desc" as const },
+          select: { target: { select: { holdings: { select: { tokenId: true } } } } }
+        }
+      }
+    }),
+    prisma.take.findMany({
+      where: { status: "PUBLISHED" },
+      take: 200,
+      select: {
+        revisions: {
+          take: 1,
+          orderBy: { number: "desc" as const },
+          select: { target: { select: { holdings: { select: { tokenId: true } } } } }
+        }
+      }
+    }),
+    prisma.stockToken.findMany({
+      where: {
+        source: "XSTOCKS",
+        status: "ACTIVE",
+        OR: [{ xstocksSymbol: { in: [...CORE_XSTOCKS] } }, { symbol: { in: [...CORE_XSTOCKS] } }]
+      },
+      select: { id: true }
+    }),
+    prisma.stockToken.findMany({ where: { source: "XSTOCKS", status: "ACTIVE" }, select: { id: true }, take: 40 }),
+    pub.smembers("hot:sse").catch(() => [] as string[])
+  ]);
+  cachedHot = partitionHotSets({
+    pocketAssetIds: [...tokenIdsFromTakes(pockets.map((p) => p.take)), ...sse],
+    trendingAssetIds: tokenIdsFromTakes(trending),
+    publishedAssetIds: tokenIdsFromTakes(published),
+    xstockIds: [...new Set([...coreX, ...xstocks].map((t) => t.id))]
+  });
+  hotAt = Date.now();
+  return cachedHot;
 }
 
 async function hydratePrevClose() {
@@ -154,9 +256,113 @@ hushLocks(
           if (q.tokenLast != null) setPriceAliases(lastTokens, q.symbol, q.tokenLast);
           if (lookupPx(sessionOpen, q.symbol) == null) setPriceAliases(sessionOpen, q.symbol, q.last);
         }
-        const cache = JSON.stringify({ at: rh.at, quotes: rh.payload });
+        let quotes: Array<{
+          tokenId?: string;
+          symbol: string;
+          last: number;
+          tokenLast?: number | null;
+          bid?: number | null;
+          ask?: number | null;
+          halt?: boolean;
+          chgPct?: number | null;
+          volumeUsd?: number | null;
+          asOf?: string;
+          stale?: boolean;
+        }> = rh.payload.map((q) => ({ ...q, tokenId: q.tokenId }));
+        const worldById = new Map<string, "STOCKS" | "MEMES">();
+        const now = Date.now();
+        const hot = await loadHotSets();
+        const want = new Set<string>();
+        if (now - lastT1 > 2_500) {
+          for (const id of hot.t1) want.add(id);
+          lastT1 = now;
+        }
+        if (now - lastT2 > 15_000) {
+          for (const id of hot.t2) want.add(id);
+          lastT2 = now;
+        }
+        if (now - lastT3 > 5 * 60_000) {
+          for (const id of hot.t3) want.add(id);
+          lastT3 = now;
+        }
+        if (want.size) {
+          const sol = await prisma.stockToken.findMany({
+            where: { id: { in: [...want] }, chainId: 101, status: "ACTIVE" }
+          });
+          for (const t of sol) worldById.set(t.id, t.world === "MEMES" ? "MEMES" : "STOCKS");
+          const solQ = sol.length
+            ? await quoteSolanaAssets(
+                sol.map((t) => ({
+                  id: t.id,
+                  symbol: t.symbol,
+                  chainId: t.chainId,
+                  contractAddress: t.contractAddress,
+                  decimals: t.decimals,
+                  source: t.source,
+                  venue: t.venue,
+                  xstocksSymbol: t.xstocksSymbol
+                }))
+              ).catch((e) => {
+                logError("worker", "sol quotes", e);
+                return new Map();
+              })
+            : new Map();
+          let oldest = now;
+          const solRows: Array<{
+            tokenId: string;
+            source: "JUPITER" | "XSTOCKS" | "DEXSCREENER" | "BAGS" | "PUMPFUN";
+            price: number;
+            volumeUsd: number | null;
+            halt: boolean;
+            updatedAt: Date;
+          }> = [];
+          for (const [id, q] of solQ) {
+            oldest = Math.min(oldest, q.observedAt);
+            const tok = sol.find((t) => t.id === id);
+            if (tok) {
+              setPriceAliases(lastMids, tok.symbol, q.last, tok.source);
+              setPriceAliases(lastTokens, tok.symbol, q.last, tok.source);
+            }
+            quotes.push({
+              tokenId: id,
+              symbol: tok?.symbol ?? id,
+              last: q.last,
+              tokenLast: q.last,
+              bid: q.last,
+              ask: q.last,
+              halt: q.halt,
+              chgPct: q.chg,
+              volumeUsd: q.liquidityUsd,
+              asOf: new Date(q.observedAt).toISOString(),
+              stale: tok?.world === "MEMES" ? now - q.observedAt > 2 * 60_000 : now - q.observedAt > 10 * 60_000
+            });
+            solRows.push({
+              tokenId: id,
+              source: q.provider === "CHAINLINK" || q.provider === "RH_REST" ? "JUPITER" : q.provider,
+              price: q.last,
+              volumeUsd: q.liquidityUsd,
+              halt: q.halt,
+              updatedAt: new Date(q.observedAt)
+            });
+          }
+          if (solRows.length && (lastSolPersistAt === 0 || now - lastSolPersistAt > 15_000)) {
+            await prisma.priceSnapshot.createMany({ data: solRows }).catch(() => {});
+            lastSolPersistAt = now;
+          }
+          if (hot.t1.length && now - oldest > 15_000) pushAlert("t1_stale", String(now - oldest));
+        }
+        const cache = JSON.stringify({ at: rh.at, quotes });
         await pub.set(QUOTES_CACHE_KEY, cache);
-        await publish("prices", { at: rh.at, quotes: rh.payload });
+        const assetFields: Record<string, string> = {};
+        for (const q of quotes) {
+          if (q.tokenId) assetFields[q.tokenId] = JSON.stringify(q);
+        }
+        if (Object.keys(assetFields).length) await pub.hset(QUOTES_ASSET_KEY, assetFields);
+        const stocks = quotes.filter((q) => (q.tokenId ? worldById.get(q.tokenId) ?? "STOCKS" : "STOCKS") === "STOCKS");
+        const memes = quotes.filter((q) => q.tokenId && worldById.get(q.tokenId) === "MEMES");
+        await publish("prices", { at: rh.at, quotes });
+        await publish("prices:STOCKS", { at: rh.at, quotes: stocks });
+        await publish("prices:MEMES", { at: rh.at, quotes: memes });
         const moved = rh.payload.some((q) => {
           const prev = lastPersisted.get(q.symbol.toUpperCase());
           return prev == null || Math.abs(prev - q.last) > 1e-6;
@@ -270,6 +476,18 @@ hushLocks(
       await publish(`take:${job.data.takeId}`, { kind: "agent", out, at: new Date().toISOString() });
       return out;
     }
+    if (job.name === "memes-hourly") {
+      const memes = await prisma.take.findMany({ where: { status: "PUBLISHED", world: "MEMES" }, select: { id: true }, take: 40 });
+      log("worker", "meme monitor", { takes: memes.length });
+      for (const t of memes) {
+        try {
+          await runDailyMonitor(t.id);
+        } catch (e) {
+          logError("worker", "meme monitor", e, { take: t.id });
+        }
+      }
+      return { takes: memes.length };
+    }
     const takes = await prisma.take.findMany({ where: { status: "PUBLISHED" }, select: { id: true }, take: 40 });
     log("worker", "agent sweep", { takes: takes.length });
     for (const t of takes) {
@@ -281,6 +499,18 @@ hushLocks(
     }
   },
     { connection, lockDuration: 180_000 }
+  )
+);
+
+hushLocks(
+  "execution",
+  new Worker(
+    "execution",
+    async (job) => {
+      log("worker", "execution", { name: job.name, pocket: job.data.pocketId });
+      return handleExecutionJob(job.data);
+    },
+    { connection, lockDuration: 10 * 60_000, concurrency: 2 }
   )
 );
 
@@ -314,12 +544,15 @@ hushLocks(
 
 async function schedule() {
   await queues.catalog.add("sync", {}, { repeat: { every: 15 * 60_000 }, jobId: "catalog-sync" });
+  await queues.catalog.add("risk-held", {}, { repeat: { every: 60_000 }, jobId: "meme-risk-held" });
+  await queues.catalog.add("risk-catalog", {}, { repeat: { every: 10 * 60_000 }, jobId: "meme-risk-catalog" });
   await queues.pricing.add("tick", {}, { repeat: { every: 1_000 }, jobId: "price-tick-1s" });
   await queues.portfolio.add("value", {}, { repeat: { every: 15_000 }, jobId: "mark" });
   await queues.outbox.add("drain", {}, { repeat: { every: 5_000 }, jobId: "outbox" });
   await queues.enrichment.add("stale", {}, { repeat: { every: 10 * 60_000 }, jobId: "enrich" });
   await queues.agent.add("daily", {}, { repeat: { pattern: "0 6 * * 1-5", tz: "America/New_York" }, jobId: "agent-daily" });
   await queues.agent.add("intraday", {}, { repeat: { pattern: "30 10,14 * * 1-5", tz: "America/New_York" }, jobId: "agent-intraday" });
+  await queues.agent.add("memes-hourly", {}, { repeat: { every: 60 * 60_000 }, jobId: "agent-memes-hourly" });
   await queues.catalog.add("boot", {}, { jobId: `catalog-boot-${Date.now()}` });
 }
 
