@@ -392,7 +392,8 @@ const researchWorker = new Worker(
     const runId = String(job.data.runId);
     log("worker", "research queued", { run: runId, attempt: job.attemptsMade + 1 });
     const emit = async (stage: string, message: string, payload?: unknown) => {
-      log("worker", `${stage}  ${message}`, { run: runId });
+      const noisy = stage === "retrieve" && /^Screened /i.test(message);
+      if (!noisy) log("worker", `${stage}  ${message}`, { run: runId });
       await prisma.researchEvent.create({ data: { runId, stage, message, payload: payload as object | undefined } });
       await publish(`research:${runId}`, { stage, message, payload, at: new Date().toISOString() });
     };

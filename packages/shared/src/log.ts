@@ -31,10 +31,19 @@ export function formatErr(err: unknown): string {
   }
 }
 
+const lastErrAt = new Map<string, number>();
+
 export function log(scope: string, event: string, extra?: Record<string, unknown>) {
   console.log(`${scope.padEnd(8)} ${event}${kv(extra)}`);
 }
 
 export function logError(scope: string, event: string, err: unknown, extra?: Record<string, unknown>) {
+  const chatter = scope === "redis" || event === "sol quotes" || event === "error";
+  if (chatter) {
+    const key = `${scope}:${event}`;
+    const prev = lastErrAt.get(key) ?? 0;
+    if (Date.now() - prev < 15_000) return;
+    lastErrAt.set(key, Date.now());
+  }
   console.error(`${scope.padEnd(8)} ${event}  ${formatErr(err)}${kv(extra)}`);
 }

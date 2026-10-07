@@ -283,9 +283,10 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
   const skip = new Set((cp0.screenedSymbols ?? []).map((s) => s.toUpperCase()));
   let relevant = mergePicks([], cp0.picks);
   if (skip.size < universe.length) {
+    const remaining = Math.min(80, Math.max(0, universe.length - skip.size));
     await emit("retrieve", world === "MEMES"
-      ? `Reading ${universe.length - skip.size} remaining launchpad coins on ${desk}`
-      : `Reading ${universe.length - skip.size} remaining names on ${desk}`);
+      ? `Reading ${remaining} remaining launchpad coins on ${desk}`
+      : `Reading ${remaining} remaining names on ${desk}`);
     const more = await screenCatalog({
       universe,
       interpretation: spec.interpretation,

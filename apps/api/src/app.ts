@@ -79,6 +79,7 @@ app.use((req, res, next) => {
     req.path === "/health" ||
     req.path.startsWith("/v1/quotes") ||
     req.path.startsWith("/v1/stream") ||
+    req.path.startsWith("/v1/research") ||
     req.path === "/v1/feed";
   if (quiet && req.method === "GET") return next();
   const started = Date.now();

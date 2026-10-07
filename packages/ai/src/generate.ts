@@ -214,7 +214,8 @@ export async function genObject<T extends z.ZodType>(opts: {
   const id = modelIdOf(model);
   const label = opts.label ?? "llm";
   const started = Date.now();
-  log("ai", label, { model: id });
+  const quiet = label.startsWith("screen ");
+  if (!quiet) log("ai", label, { model: id });
 
   const parse = (raw: unknown) => opts.schema.safeParse(repairLlmValue(raw));
 
@@ -236,7 +237,7 @@ export async function genObject<T extends z.ZodType>(opts: {
     } as Parameters<typeof generateObject>[0]);
     const parsed = parse(object);
     if (!parsed.success) throw parsed.error;
-    log("ai", `${label} ok`, { model: id, ms: Date.now() - started });
+    if (!quiet) log("ai", `${label} ok`, { model: id, ms: Date.now() - started });
     return parsed.data;
   } catch (err) {
     const text = NoObjectGeneratedError.isInstance(err) ? err.text : undefined;
@@ -245,7 +246,7 @@ export async function genObject<T extends z.ZodType>(opts: {
     if (raw && !looksLikeJsonSchema(raw)) {
       const again = parse(raw);
       if (again.success) {
-        log("ai", `${label} repaired`, { model: id, ms: Date.now() - started });
+        if (!quiet) log("ai", `${label} repaired`, { model: id, ms: Date.now() - started });
         return again.data;
       }
     }

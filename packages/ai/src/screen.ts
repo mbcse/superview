@@ -50,10 +50,11 @@ export async function screenCatalog(input: {
   }) => Promise<void>;
 }): Promise<ScreenerOut["picks"]> {
   const skip = new Set([...(input.skipSymbols ?? [])].map((s) => s.toUpperCase()));
+  const SCREEN_CAP = 80;
   const ordered = orderByThesis(
     input.universe.filter((u) => !skip.has(u.symbol.toUpperCase())),
     input.queryEmbedding
-  );
+  ).slice(0, SCREEN_CAP);
   if (!ordered.length) return [];
   const batches = chunk(ordered, 25);
   const picks: ScreenerOut["picks"] = [];
