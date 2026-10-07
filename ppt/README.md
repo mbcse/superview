@@ -13,7 +13,7 @@ Open `http://127.0.0.1:4173` or `http://127.0.0.1:3000`.
 
 ## Deploy
 
-This folder is a static HTML deck. On Vercel, set **Root Directory** to `ppt`, **Framework Preset** to Other, and **Output Directory** to `.` — or leave those to `ppt/vercel.json`. Do not use the monorepo `pnpm build` / Turbo command; that build does not include this folder.
+Use a **separate** Vercel project from superview.fun. Set that project’s **Root Directory** to `ppt`. Do not change the SuperView web app project (Framework Next.js, Root Directory `apps/web`).
 
 - Arrow keys, Space, Page Up, and Page Down navigate.
 - `F` toggles fullscreen.
