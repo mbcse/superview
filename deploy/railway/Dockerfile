@@ -17,6 +17,7 @@ COPY packages/chain/package.json packages/chain/package.json
 COPY packages/config/package.json packages/config/package.json
 COPY packages/core/package.json packages/core/package.json
 COPY packages/db/package.json packages/db/package.json
+COPY packages/markets/package.json packages/markets/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/ui/package.json packages/ui/package.json
 
