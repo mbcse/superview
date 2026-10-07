@@ -116,10 +116,12 @@ export function createMip003Router() {
       return res.status(400).json({ error: "belief_required", hint: "input_data.belief" });
     }
     try {
+      console.log("[masumi-agent] start_job", { identifierFromPurchaser, belief: belief.slice(0, 80) });
       const job = await openJob(identifierFromPurchaser, inputData, belief, horizon);
       res.json(mipStart(job));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      console.error("[masumi-agent] start_job failed", message);
       const code = message.startsWith("identifier_from_purchaser") || message.startsWith("missing_env") ? 400 : 500;
       res.status(code).json({ error: message });
     }
