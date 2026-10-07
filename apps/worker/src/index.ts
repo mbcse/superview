@@ -26,9 +26,23 @@ import { quoteSolanaAssets, syncBagsCatalog, syncJupiterMemeCatalog, syncXStocks
 import { handleExecutionJob, reportProviderHealth } from "./execution.js";
 
 const env = loadEnv();
+
+async function unlockRedisWrites(client: Redis) {
+  try {
+    await client.config("SET", "stop-writes-on-bgsave-error", "no");
+    await client.config("SET", "save", "");
+    log("redis", "writes unlocked");
+  } catch (err) {
+    logError("redis", "config", err);
+  }
+}
+
 function redisClient() {
   const client = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
   client.on("error", (err) => logError("redis", "error", err));
+  client.on("ready", () => {
+    void unlockRedisWrites(client);
+  });
   return client;
 }
 const connection = redisClient();
