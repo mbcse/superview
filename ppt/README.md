@@ -11,6 +11,10 @@ node dev-server.js
 
 Open `http://127.0.0.1:4173` or `http://127.0.0.1:3000`.
 
+## Deploy
+
+This folder is a static HTML deck. On Vercel, set **Root Directory** to `ppt`, **Framework Preset** to Other, and **Output Directory** to `.` — or leave those to `ppt/vercel.json`. Do not use the monorepo `pnpm build` / Turbo command; that build does not include this folder.
+
 - Arrow keys, Space, Page Up, and Page Down navigate.
 - `F` toggles fullscreen.
 - `PDF` exports a 16:9 PDF; the export libraries load from cdnjs.
