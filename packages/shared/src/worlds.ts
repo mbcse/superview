@@ -83,6 +83,10 @@ export function deskOf(world: World, chainId: number) {
   return DESKS.find((d) => d.world === world && d.chainId === chainId) ?? DESKS[0]!;
 }
 
+export function chainLabel(chainId: number) {
+  return chainId === SOLANA_CHAIN_ID ? "Solana" : "Robinhood Chain";
+}
+
 export function cashTokenId(world: World, chainId: number): string {
   const desk = deskOf(world, chainId);
   return desk.cash === "USDC" ? `USDC:${SOLANA_CHAIN_ID}` : "USDG";

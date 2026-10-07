@@ -22,6 +22,7 @@ describe("astrology canon", () => {
       date: "2026-10-07",
       system: "VEDIC",
       canon: astrologyCanon("VEDIC"),
+      desk: "Stocks · Solana",
       marketContext: ""
     });
     expect(p).toContain(VEDIC_CHART);
@@ -38,6 +39,7 @@ describe("astrology canon", () => {
       date: "2026-10-07",
       system: "WESTERN",
       canon: astrologyCanon("WESTERN"),
+      desk: "Stocks · Solana",
       marketContext: ""
     });
     expect(p).toContain(WESTERN_CHART);

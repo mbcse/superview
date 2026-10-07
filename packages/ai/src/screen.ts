@@ -39,6 +39,7 @@ export async function screenCatalog(input: {
   angles: unknown;
   queryEmbedding: number[];
   skipSymbols?: Set<string>;
+  desk?: string;
   prompt?: string;
   onBatch?: (info: {
     done: number;
@@ -70,6 +71,7 @@ export async function screenCatalog(input: {
         mechanism: input.mechanism,
         angles: JSON.stringify(input.angles),
         batch: `${i + 1}/${batches.length}`,
+        desk: input.desk ?? "this desk",
         candidates: JSON.stringify(slice.map(catalogCard))
       })
     });

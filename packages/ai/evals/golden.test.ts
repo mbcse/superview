@@ -26,8 +26,15 @@ loadRootOpenAiKey();
 
 describe("prompt contract", () => {
   it("fills interpreter variables", () => {
-    const p = fill(INTERPRETER_PROMPT, { view: "humanoid robots in every home", date: "2026-09-30", marketContext: "" });
+    const p = fill(INTERPRETER_PROMPT, {
+      view: "humanoid robots in every home",
+      date: "2026-09-30",
+      marketContext: "",
+      desk: "Stocks · Solana"
+    });
     expect(p).toContain("humanoid robots in every home");
+    expect(p).toContain("Stocks · Solana");
+    expect(p).not.toContain("Robinhood Chain");
     expect(p).toContain("Only refuse if the input is empty");
     const sky = fill(ASTROLOGY_INTERPRETER_PROMPT, {
       view: "Saturn transits the 10th",
@@ -35,9 +42,11 @@ describe("prompt contract", () => {
       date: "2026-10-07",
       system: "VEDIC",
       canon: astrologyCanon("VEDIC"),
+      desk: "Stocks · Solana",
       marketContext: ""
     });
     expect(sky).toContain("PRIMARY SYSTEM (VEDIC)");
+    expect(sky).toContain("Stocks · Solana");
     const monitor = fill(MONITOR_PROMPT, {
       thesis: "Labor stays tight.",
       positions: "[]",
@@ -93,7 +102,8 @@ describe("golden interpreter", () => {
             prompt: fill(INTERPRETER_PROMPT, {
               view: g.sentence,
               date: "2026-10-02",
-              marketContext: ""
+              marketContext: "",
+              desk: "Stocks · Robinhood Chain"
             }),
             label: `golden:${g.id}`
           });

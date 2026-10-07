@@ -5,6 +5,7 @@ import { genObject } from "./generate.js";
 import {
   displaySymbol,
   log,
+  deskOf,
   parseChainId,
   parseWorld,
   sanitizeCatalogText,
@@ -131,6 +132,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
 
   const world: World = parseWorld(run.world ?? run.take?.world);
   const chainId = parseChainId(run.chainId ?? run.take?.chainId, world);
+  const desk = deskOf(world, chainId).title;
   const launchBet = /launch|just launched|new coin|bonding/i.test(view);
   const listed = await prisma.stockToken.findMany({
     where: { status: "ACTIVE", world, chainId },
@@ -204,13 +206,20 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
               date: new Date().toISOString().slice(0, 10),
               system: astrologySystem,
               canon: astrologyCanon(astrologySystem),
+              desk,
               marketContext:
-                world === "MEMES" ? "Launchpad memecoins. Culture and community, not earnings." : ""
+                world === "MEMES"
+                  ? `Launchpad memecoins on ${desk}. Culture and community, not earnings.`
+                  : `Stock tokens on ${desk}.`
             })
           : fill(world === "MEMES" ? MEME_INTERPRETER_PROMPT : INTERPRETER_PROMPT, {
               view,
               date: new Date().toISOString().slice(0, 10),
-              marketContext: world === "MEMES" ? "Launchpad memecoins. Culture and community, not earnings." : ""
+              desk,
+              marketContext:
+                world === "MEMES"
+                  ? `Launchpad memecoins on ${desk}. Culture and community, not earnings.`
+                  : `Stock tokens on ${desk}.`
             })
     });
     await patchCheckpoint(runId, { spec });
@@ -275,8 +284,8 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
   let relevant = mergePicks([], cp0.picks);
   if (skip.size < universe.length) {
     await emit("retrieve", world === "MEMES"
-      ? `Reading ${universe.length - skip.size} remaining launchpad coins`
-      : `Reading ${universe.length - skip.size} remaining names on this desk`);
+      ? `Reading ${universe.length - skip.size} remaining launchpad coins on ${desk}`
+      : `Reading ${universe.length - skip.size} remaining names on ${desk}`);
     const more = await screenCatalog({
       universe,
       interpretation: spec.interpretation,
@@ -284,6 +293,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
       angles: spec.angles,
       queryEmbedding: qEmb,
       skipSymbols: skip,
+      desk,
       prompt: world === "MEMES" ? MEME_SCREENER_PROMPT : undefined,
       onBatch: async (info) => {
         await patchCheckpoint(runId, { picks: info.batchPicks, screenedSymbols: info.batchSymbols });

@@ -15,6 +15,7 @@
     "db:seed": "pnpm --filter @takeandstake/db seed",
     "start:api": "pnpm --filter @takeandstake/api start",
     "start:worker": "pnpm --filter @takeandstake/worker start",
+    "start:web": "pnpm --filter @takeandstake/web start",
     "spike": "pnpm --filter @takeandstake/chain exec tsx ../../scripts/spikes/run.ts"
   },
   "devDependencies": {

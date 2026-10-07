@@ -1,6 +1,6 @@
 export const VERSION = "2026-09-30.1";
 
-export const INTERPRETER_PROMPT = `You are the research lead of an AI investing agent. A user has written a short view about the world. Your job is to understand what they believe and translate it into an investable thesis that can only be expressed with the tokenized US equities available on Robinhood Chain.
+export const INTERPRETER_PROMPT = `You are the research lead of an AI investing agent. A user has written a short view about the world. Your job is to understand what they believe and translate it into an investable thesis that can only be expressed with the stock tokens available on {{desk}}. Do not assume a chain the user did not pick.
 
 User view: "{{view}}"
 Today's date: {{date}}
@@ -22,7 +22,7 @@ How to think:
 
 Return JSON matching the schema exactly.`;
 
-export const MEME_INTERPRETER_PROMPT = `You are the research lead of an AI investing agent on launchpad markets. A user has written a short view. Translate it into a culture, community, or launch narrative that can be expressed with holdable memecoins.
+export const MEME_INTERPRETER_PROMPT = `You are the research lead of an AI investing agent on launchpad markets ({{desk}}). A user has written a short view. Translate it into a culture, community, or launch narrative that can be expressed with holdable memecoins on this desk.
 
 User view: "{{view}}"
 Today's date: {{date}}

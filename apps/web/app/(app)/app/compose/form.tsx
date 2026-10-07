@@ -117,8 +117,7 @@ export default function ComposeForm() {
   const reduce = useReducedMotion();
   const fork = useSearchParams().get("fork");
   const lensParam = useSearchParams().get("lens");
-  const { world, setWorld, chainId } = useWorld();
-  const [deskChain, setDeskChain] = useState(chainId);
+  const { world, setWorld, chainId, setChainId } = useWorld();
   const [lens, setLens] = useState<"BELIEF" | "SKY">(lensParam === "sky" ? "SKY" : "BELIEF");
   const [astrologySystem, setAstrologySystem] = useState<"VEDIC" | "WESTERN">("VEDIC");
   const [chart, setChart] = useState("");
@@ -143,10 +142,6 @@ export default function ComposeForm() {
   useEffect(() => {
     if (lensParam === "sky") setLens("SKY");
   }, [lensParam]);
-
-  useEffect(() => {
-    setDeskChain(chainId);
-  }, [chainId]);
 
   useEffect(() => {
     fetchApi<{ liveEnabled?: boolean; wallet?: { id?: string } }>("/v1/wallet")
@@ -217,7 +212,7 @@ export default function ComposeForm() {
         body: JSON.stringify({
           sentence,
           world,
-          chainId: deskChain,
+          chainId,
           parentTakeId: fork || undefined,
           lens,
           astrologySystem: lens === "SKY" ? astrologySystem : undefined,
@@ -344,7 +339,7 @@ export default function ComposeForm() {
             </button>
           </div>
           <div className="flex min-h-0 flex-1 items-start justify-end pt-8 md:pt-14">
-            <ResearchLiveLog events={events} />
+            <ResearchLiveLog events={events} world={world} chainId={chainId} />
           </div>
           <div className="glass-night flex items-center gap-4 rounded-2xl px-5 py-4 md:gap-6">
             <p className="min-w-0 flex-1 truncate text-[15px] font-medium text-white/90">
@@ -425,7 +420,7 @@ export default function ComposeForm() {
                   role={h.role}
                   takeId={takeId}
                   whyInBasket={h.rationale}
-                  chainId={deskChain}
+                  chainId={chainId}
                 />
               ))}
             </div>
@@ -621,14 +616,11 @@ export default function ComposeForm() {
         <ComposeChooser
           lens={lens}
           world={world}
-          chainId={deskChain}
+          chainId={chainId}
           system={astrologySystem}
           onLens={setLens}
-          onWorld={(w) => {
-            setWorld(w);
-            setDeskChain(w === "MEMES" ? 101 : 4663);
-          }}
-          onChain={setDeskChain}
+          onWorld={setWorld}
+          onChain={setChainId}
           onSystem={setAstrologySystem}
         />
         {suggestWorld ? (
@@ -640,7 +632,6 @@ export default function ComposeForm() {
                 className="underline"
                 onClick={() => {
                   setWorld(suggestWorld);
-                  setDeskChain(suggestWorld === "MEMES" ? 101 : 4663);
                   setSuggestWorld(null);
                 }}
               >
