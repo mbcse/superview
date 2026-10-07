@@ -1,0 +1,22 @@
+{
+  "name": "@takeandstake/masumi-agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env --env-file=.env src/index.ts",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx --env-file=../../.env --env-file=.env src/index.ts",
+    "start:prod": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.2"
+  }
+}

@@ -79,6 +79,44 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  apps/masumi-agent:
+    dependencies:
+      express:
+        specifier: ^4.21.2
+        version: 4.22.3
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.15
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.0
+        version: 5.0.6
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
+  apps/masumi-worker:
+    dependencies:
+      express:
+        specifier: ^4.21.2
+        version: 4.22.3
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.15
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.0
+        version: 5.0.6
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.4
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   apps/web:
     dependencies:
       '@base-ui/react':
