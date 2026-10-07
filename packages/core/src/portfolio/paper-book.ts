@@ -6,7 +6,7 @@ import { computePocketMark } from "./tick.js";
 import { latestPrice } from "../market/prices.js";
 import { planRebalanceTrades } from "./rebalance.js";
 import { oracleBand, quoteWithinOracle } from "../execution/checks.js";
-import { cashTokenId, displaySymbol, MEME_MAX_POOL_SHARE, MEME_STALE_MS, type World } from "@takeandstake/shared";
+import { cashTokenId, displaySymbol, logError, MEME_MAX_POOL_SHARE, MEME_STALE_MS, type World } from "@takeandstake/shared";
 
 function paperCashId(take?: { world?: World; chainId?: number } | null) {
   return take ? cashTokenId(take.world ?? "STOCKS", take.chainId ?? 4663) : "USDG";
@@ -208,9 +208,9 @@ async function writeFills(opts: {
           orderId: opts.orderId,
           side: fill.side,
           tokenId: fill.tokenId,
-          sellAmount: amounts.sellAmount,
+          sellAmount: amounts.sellAmount || "0",
           status: "SKIPPED",
-          skipReason: fill.skip
+          skipReason: String(fill.skip).slice(0, 120)
         }
       });
       legsOut.push({ symbol: fill.symbol, status: "SKIPPED", skip: fill.skip });
@@ -251,7 +251,7 @@ async function writeFills(opts: {
           create: {
             quoteJson: fill.quoteJson,
             buyAmount: amounts.buyAmount,
-            price: fill.implied,
+            price: Number.isFinite(fill.implied) ? fill.implied : 0,
             expiresAt: new Date(Date.now() + 30_000)
           }
         }
@@ -465,7 +465,8 @@ export async function runDryRunInvest(pocketId: string, env: PaperEnv) {
     });
   } catch (err) {
     if (err instanceof PocketLockError) return { error: "not_found" as const };
-    throw err;
+    logError("paper", "invest", err);
+    return { error: "invest_failed" as const };
   }
 }
 

@@ -42,7 +42,7 @@ import { researchRouter } from "./routes/research.js";
 import { socialRouter } from "./routes/social.js";
 import { deskRouter } from "./routes/desk.js";
 import { streamRouter } from "./routes/stream.js";
-import { redis } from "./redis.js";
+import { redis, unlockRedisWrites } from "./redis.js";
 import { hitRateLimit, LIMIT_INVEST, LIMIT_WITHDRAW } from "./rate-limit.js";
 
 function pid(req: Request, key: string) {
@@ -707,7 +707,10 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
     const auto = await prisma.featureFlag.findUnique({ where: { key: "auto_dry_run" } });
     const published = take.status === "PUBLISHED";
     if (auto?.enabled && published) {
-      invest = await runDryRunInvest(pocket.id, env);
+      invest = await runDryRunInvest(pocket.id, env).catch((e) => {
+        logError("api", "auto dry-run", e);
+        return { error: "invest_failed" as const };
+      });
     }
   }
   if (parsed.data.level === "LIVE") {
@@ -726,12 +729,17 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
 app.post("/v1/pockets/:id/dry-run-invest", requireAuth, async (req, res) => {
   const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
   if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
-  const result = await runDryRunInvest(pid(req, "id"), env);
-  if ("error" in result) {
-    const code = result.error;
-    return res.status(code === "not_found" ? 404 : 400).json({ error: code });
+  try {
+    const result = await runDryRunInvest(pid(req, "id"), env);
+    if ("error" in result) {
+      const code = result.error;
+      return res.status(code === "not_found" ? 404 : 400).json({ error: code });
+    }
+    res.json(result);
+  } catch (e) {
+    logError("api", "dry-run invest", e);
+    res.status(500).json({ error: "invest_failed" });
   }
-  res.json(result);
 });
 
 app.post("/v1/pockets/:id/deposit", requireAuth, async (req, res) => {
@@ -1267,6 +1275,7 @@ export function start() {
   process.on("unhandledRejection", (err) => {
     logError("api", "unhandledRejection", err);
   });
+  void unlockRedisWrites();
   void refreshChainlistRpcs().then((urls) => {
     if (urls.length) log("api", "chainlist rpcs", { n: urls.length });
   });

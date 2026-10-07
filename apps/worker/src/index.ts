@@ -27,22 +27,23 @@ import { handleExecutionJob, reportProviderHealth } from "./execution.js";
 
 const env = loadEnv();
 
-async function unlockRedisWrites(client: Redis) {
+async function unlockRedisWrites() {
+  const client = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 1, enableReadyCheck: false, lazyConnect: true });
   try {
+    await client.connect();
     await client.config("SET", "stop-writes-on-bgsave-error", "no");
     await client.config("SET", "save", "");
     log("redis", "writes unlocked");
   } catch (err) {
     logError("redis", "config", err);
+  } finally {
+    client.disconnect();
   }
 }
 
 function redisClient() {
   const client = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null, enableReadyCheck: false });
   client.on("error", (err) => logError("redis", "error", err));
-  client.on("ready", () => {
-    void unlockRedisWrites(client);
-  });
   return client;
 }
 const connection = redisClient();
@@ -587,6 +588,7 @@ function listenHealth() {
 
 schedule()
   .then(async () => {
+    await unlockRedisWrites();
     const extra = await refreshChainlistRpcs().catch(() => []);
     if (extra.length) log("worker", "chainlist rpcs", { n: extra.length });
     await hydratePrevClose().catch((e) => logError("worker", "prevclose", e));

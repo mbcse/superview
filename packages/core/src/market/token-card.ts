@@ -44,10 +44,11 @@ function symbolsFor(raw: string) {
 }
 
 export async function loadTokenCard(symbol: string): Promise<{ card: TokenCard; tokenId: string } | null> {
-  const symbols = symbolsFor(symbol);
+  const raw = symbol.trim();
+  const symbols = [...new Set([...symbolsFor(raw), raw, raw.replace(/x$/i, ""), `${raw.replace(/x$/i, "")}x`])].filter(Boolean);
   if (!symbols.length) return null;
   const tokens = await prisma.stockToken.findMany({
-    where: { symbol: { in: symbols } },
+    where: { OR: symbols.map((s) => ({ symbol: { equals: s, mode: "insensitive" } })) },
     include: { universe: true }
   });
   const token = tokens.find((t) => t.universe) ?? tokens[0];
