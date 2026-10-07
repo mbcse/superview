@@ -234,7 +234,7 @@
     background: var(--node-color);
     box-shadow:
         0 0 0 3px rgba(10, 10, 10, 0.85),
-        0 0 14px color-mix(in srgb, var(--node-color) 70%, transparent);
+        0 0 14px var(--node-color);
     opacity: 0;
     transform: scale(0.4);
     transition: opacity 0.35s ease, transform 0.45s var(--pf-ease);
@@ -373,7 +373,7 @@
     width: 2.1rem;
     height: 2.1rem;
     color: var(--card-accent);
-    filter: drop-shadow(0 0 10px color-mix(in srgb, var(--card-accent) 55%, transparent));
+    filter: drop-shadow(0 0 10px var(--card-accent));
 }
 
 .pf-card__icon svg {
@@ -454,7 +454,7 @@
     height: 1.15rem;
     margin-top: 0.12rem;
     color: var(--sum-accent);
-    filter: drop-shadow(0 0 8px color-mix(in srgb, var(--sum-accent) 50%, transparent));
+    filter: drop-shadow(0 0 8px var(--sum-accent));
 }
 
 .pf-summary__icon svg {

@@ -17,10 +17,7 @@
     "start:worker": "pnpm --filter @takeandstake/worker start",
     "start:web": "pnpm --filter @takeandstake/web start",
     "dev:masumi-agent": "pnpm --filter @takeandstake/masumi-agent dev",
-    "dev:masumi-worker": "pnpm --filter @takeandstake/masumi-worker dev",
     "start:masumi-agent": "pnpm --filter @takeandstake/masumi-agent start",
-    "start:masumi-worker": "pnpm --filter @takeandstake/masumi-worker start",
-    "smoke:masumi-personal": "bash scripts/masumi-personal-smoke.sh",
     "spike": "pnpm --filter @takeandstake/chain exec tsx ../../scripts/spikes/run.ts"
   },
   "devDependencies": {

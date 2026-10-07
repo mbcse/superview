@@ -1,52 +1,34 @@
-# Masumi / Sokosumi apps (Cardano track — Preprod)
+# SuperView Masumi agent
 
-Two **new** apps beside SuperView. They do **not** change `apps/web`, `apps/api`, `apps/worker`, or Prisma.
+Public MIP-003 agent for Sokosumi. Sokosumi calls this service. It opens escrow on the Masumi Payment Service, waits until Preprod funds lock, then calls SuperView research at `https://api.superview.fun`.
 
-| App | Role |
-| --- | --- |
-| [`masumi-agent`](./masumi-agent) | MIP-003 HTTP API → existing `POST /v1/research` until DRAFT |
-| [`masumi-worker`](./masumi-worker) | Waits for **Masumi escrow**, then calls the agent |
+There is no Masumi worker. Research is run by the existing SuperView worker behind `api.superview.fun`.
 
-MPS is run separately (local or Railway). **Mainnet is out of scope** for this handoff.
+## Railway
 
-Payment status: **Masumi/MPS only**. SuperView DB only stores the research run.
+Dockerfile: [`deploy/railway/Dockerfile.masumi-agent`](../../deploy/railway/Dockerfile.masumi-agent)
 
-## Deploy handoff (Railway)
+Env paste: [`deploy/railway/masumi.env.example`](../../deploy/railway/masumi.env.example)
 
-Full checklist for your teammate: [`deploy/railway/MASUMI_HANDOFF.md`](../../deploy/railway/MASUMI_HANDOFF.md)
-
-| Artifact | Path |
-| --- | --- |
-| Agent Dockerfile | [`deploy/railway/Dockerfile.masumi-agent`](../../deploy/railway/Dockerfile.masumi-agent) |
-| Worker Dockerfile | [`deploy/railway/Dockerfile.masumi-worker`](../../deploy/railway/Dockerfile.masumi-worker) |
-| Env paste template | [`deploy/railway/masumi.env.example`](../../deploy/railway/masumi.env.example) |
-
-Prod start (no `.env` files; Railway injects vars): `pnpm start:prod` inside each app (used by Docker `tsx src/index.ts`).
-
-## Personal / local smoke
-
-```bash
-pnpm dev:masumi-agent
-pnpm dev:masumi-worker
-# worker MOCK_PAYMENTS=true
-pnpm smoke:masumi-personal
+```
+SUPERVIEW_API_URL=https://api.superview.fun
+PAYMENT_SERVICE_URL=https://<ngrok-host>/api/v1
+PAYMENT_API_KEY=
+SELLER_VKEY=
+AGENT_IDENTIFIER=
+NETWORK=Preprod
+SUPERVIEW_AUTH_TOKEN=Bearer <privy>
 ```
 
-## MIP-003 (must work at registration URL)
+The payment service stays in the official Masumi repo on a teammate machine. Expose it with ngrok. Point Sokosumi and the Masumi registry at this agent's public Railway URL. Keep the same `AGENT_IDENTIFIER`.
 
-- `GET /availability` → `status: "available"`
-- `GET /input_schema` → `belief` (+ optional `horizon`)
-- `POST /start_job` → `{ job_id, status }` with `identifier_from_purchaser` + `input_data.belief`
-- `GET /status?job_id=` → `completed` + string `result` + `resultHash`
+## Flow
 
-## Sokosumi org (you) + admin
+1. Sokosumi `POST /start_job` with a 14–26 hex `identifier_from_purchaser` and `input_data.belief`.
+2. Agent `POST /api/v1/payment/` and returns `blockchainIdentifier` plus pay deadlines.
+3. Sokosumi pays. Agent polls until `FundsLocked`.
+4. Agent `POST https://api.superview.fun/v1/research` and waits for a draft brief.
+5. Agent `POST /api/v1/payment/submit-result` with the SHA-256 of the brief.
+6. Sokosumi `GET /status?job_id=` receives `completed` and the brief string.
 
-1. `npx sokosumi@latest --preprod vendors create --name "SuperView" --slug "superview-jatin" --json`
-2. Send admin pack from [MASUMI_HANDOFF.md](../../deploy/railway/MASUMI_HANDOFF.md) (Vendor ID + Railway agent URL + agentIdentifier).
-3. After Coworker ID: `coworkers connect` / `update --base-url`. View in **org workspace**; may be private until approve.
-4. Paid hire: `MOCK_PAYMENTS=false`; capture **tx hash** in MPS for judges.
-
-## Safety
-
-- Stops at research **DRAFT** — never auto-publishes or paper-invests.
-- Does not edit compose / RH paper invest pipeline.
+Stops at research draft. Does not publish or invest.
