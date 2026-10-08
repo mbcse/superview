@@ -60,13 +60,15 @@ export function toUnixSeconds(value: unknown, fallback: number) {
 export function paymentAction(row: unknown) {
   if (!row || typeof row !== "object") return "";
   const record = row as Record<string, unknown>;
+  const onChain = String(record.onChainState ?? "").trim();
+  if (onChain) return onChain;
   const next = record.NextAction;
   if (typeof next === "string" && next) return next;
   if (next && typeof next === "object") {
     const action = String((next as Record<string, unknown>).requestedAction ?? "");
     if (action) return action;
   }
-  return String(record.onChainState ?? record.CurrentAction ?? "");
+  return String(record.CurrentAction ?? "");
 }
 
 export function fundsAreLocked(action: string) {
@@ -129,7 +131,8 @@ export async function createPayment(input: {
     body: JSON.stringify({
       agentIdentifier: agentEnv.agentIdentifier,
       network: agentEnv.network,
-      paymentType: "Web3CardanoV1",
+      paymentSourceType: "Web3CardanoV2",
+      supportedPaymentSourceIndex: 0,
       identifierFromPurchaser: input.identifierFromPurchaser,
       inputHash: input.inputHash,
       payByTime: iso(input.deadlines.payByTime),
@@ -142,7 +145,11 @@ export async function createPayment(input: {
   const data = paymentData(body);
   const blockchainIdentifier = String(data.blockchainIdentifier ?? "").trim();
   if (!res.ok || !blockchainIdentifier) {
-    throw new Error(`payment_create_failed:${res.status}`);
+    const detail =
+      typeof (body as { error?: { message?: string } }).error?.message === "string"
+        ? (body as { error: { message: string } }).error.message
+        : JSON.stringify(body).slice(0, 300);
+    throw new Error(`payment_create_failed:${res.status}:${detail}`);
   }
   return {
     blockchainIdentifier,
@@ -155,10 +162,9 @@ export async function createPayment(input: {
 
 export async function findPayment(blockchainIdentifier: string) {
   const network = encodeURIComponent(agentEnv.network);
-  const id = encodeURIComponent(blockchainIdentifier);
+  const agent = encodeURIComponent(agentEnv.agentIdentifier);
   const urls = [
-    `${agentEnv.paymentServiceUrl}/payment/?network=${network}&blockchainIdentifier=${id}`,
-    `${agentEnv.paymentServiceUrl}/payment/?network=${network}&take=100`
+    `${agentEnv.paymentServiceUrl}/payment/?network=${network}&filterPaymentSourceType=Web3CardanoV2&filterAgentIdentifier=${agent}&limit=100`
   ];
   let lastStatus = 0;
   for (const url of urls) {
