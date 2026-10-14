@@ -6,11 +6,12 @@ import {
   feedAnswerToUsd,
   readAggregator
 } from "@takeandstake/chain";
-import { log, logError } from "@takeandstake/shared";
-import { ingestRobinhoodPrices, latestPrices, liveQuoteForToken, lookupPx, prevCloseByTokens, type LiveQuote } from "../market/prices.js";
+import { SOL_MINT, log, logError } from "@takeandstake/shared";
+import { companyQuoteKeys, ingestRobinhoodPrices, latestPrices, liveQuoteForToken, lookupPx, prevCloseByTokens, type LiveQuote } from "../market/prices.js";
 import { backingPrivacy } from "../social/backing.js";
 import { asNum, asSharePrice, unitsToQty, weightedBookIndex, type HoldingContribution } from "./mark.js";
 import { buildTakeSeries, rangeSince } from "./series.js";
+import { sumCashUsd } from "../execution/live-cash.js";
 
 export const KNOWN_CHAINLINK_FEEDS: Record<string, `0x${string}`> = {
   RHNVDA: RHNVDA_FEED,
@@ -99,10 +100,7 @@ export async function listQuotes(symbols?: string[]): Promise<QuoteRow[]> {
   const ticks = (symbols ?? []).filter((s) => s.length <= 16);
   const expanded = new Set<string>();
   for (const s of ticks) {
-    const u = s.toUpperCase();
-    expanded.add(u);
-    if (u.startsWith("RH") && u.length > 2) expanded.add(u.slice(2));
-    else expanded.add(`RH${u}`);
+    for (const k of companyQuoteKeys(s)) expanded.add(k);
   }
   const symbolMatch = [...expanded].map((s) => ({ symbol: { equals: s, mode: "insensitive" as const } }));
   const tokens = await prisma.stockToken.findMany({
@@ -113,7 +111,7 @@ export async function listQuotes(symbols?: string[]): Promise<QuoteRow[]> {
             ...symbolMatch
           ]
         }
-      : { chainId: 4663 }
+      : { world: "STOCKS" }
   });
   const closes = await prevCloseByTokens(tokens);
   return Promise.all(tokens.map((t) => liveQuoteForToken(t, closes.get(t.id) ?? null)));
@@ -132,6 +130,9 @@ export async function markPublishedTakes(liveLast?: Map<string, number>, liveTok
   });
   const spy = await prisma.stockToken.findFirst({
     where: { chainId: 4663, symbol: { in: ["RHSPY", "SPY"] } }
+  });
+  const sol = await prisma.stockToken.findFirst({
+    where: { OR: [{ contractAddress: SOL_MINT }, { symbol: "SOL" }], chainId: 101 }
   });
   const lookup = (book: Map<string, number> | undefined, symbol: string, source?: string) => {
     if (!book?.size) return null;
@@ -170,14 +171,15 @@ export async function markPublishedTakes(liveLast?: Map<string, number>, liveTok
     }
     const book = weightedBookIndex(legs);
     if (book.index == null) continue;
+    const benchToken = take.world === "MEMES" ? sol : spy;
     let benchmark: number | null = null;
     let spyContrib: HoldingContribution[] = [];
-    if (spy) {
-      const snaps = await latestMarks(spy.id, 2);
-      const priced = shareLeg(spy.symbol, asNum(snaps[0]?.price), await priceAtOrAfter(spy.id, take.createdAt), asNum(snaps[1]?.price));
+    if (benchToken) {
+      const snaps = await latestMarks(benchToken.id, 2);
+      const priced = shareLeg(benchToken.symbol, asNum(snaps[0]?.price), await priceAtOrAfter(benchToken.id, take.createdAt), asNum(snaps[1]?.price));
       const spyLeg = {
-        tokenId: spy.id,
-        symbol: spy.symbol,
+        tokenId: benchToken.id,
+        symbol: benchToken.symbol,
         weightBps: 10_000,
         ...priced
       };
@@ -193,6 +195,7 @@ export async function markPublishedTakes(liveLast?: Map<string, number>, liveTok
         asOf: new Date(),
         indexValue: book.index,
         benchmarkIndex: benchmark,
+        benchmark: take.world === "MEMES" ? "SOL" : "SPY",
         holdingContributions: [...book.contributions, ...spyContrib]
       }
     });
@@ -216,6 +219,8 @@ export type PocketMark = {
     mtm: number | null;
     cost: number;
     pnl: number | null;
+    chainId?: number | null;
+    logoUrl?: string | null;
   }>;
 };
 
@@ -229,10 +234,7 @@ export async function computePocketMark(pocketId: string): Promise<PocketMark | 
     }
   });
   if (!pocket) return null;
-  const cashAcc = pocket.accounts.find((a) => a.kind === "CASH");
-  const cashUsd = cashAcc
-    ? cashAcc.entries.reduce((s, e) => s + Number(e.usdValue), 0)
-    : 0;
+  const cashUsd = sumCashUsd(pocket.accounts);
   const legs: PocketMark["legs"] = [];
   let positionsUsd = 0;
   let cost = 0;
@@ -255,7 +257,9 @@ export async function computePocketMark(pocketId: string): Promise<PocketMark | 
       last,
       mtm,
       cost: costUsd,
-      pnl: mtm == null ? null : mtm - costUsd
+      pnl: mtm == null ? null : mtm - costUsd,
+      chainId: token?.chainId ?? null,
+      logoUrl: token?.logoUrl ?? null
     });
   }
   const navUsd = cashUsd + positionsUsd;
@@ -366,14 +370,14 @@ export function serializeFeedTake(t: {
   createdAt: Date;
   seeded?: boolean;
   world?: string;
-  chainId?: number;
+  chainId?: number | null;
   lens?: string;
   astrologySystem?: string | null;
   author: { handle: string };
   revisions: Array<{
     sentence: string;
     astrologyChart?: string | null;
-    target: { holdings: Array<{ tokenId: string; weightBps: number; rationale: string; token: { symbol: string; feedAddress: string | null; logoUrl?: string | null } }> } | null;
+    target: { holdings: Array<{ tokenId: string; weightBps: number; rationale: string; token: { symbol: string; feedAddress: string | null; logoUrl?: string | null; chainId?: number } }> } | null;
   }>;
   valuations: Array<{
     indexValue: unknown;
@@ -391,6 +395,7 @@ export function serializeFeedTake(t: {
   const indexValue = asNum(val?.indexValue);
   const benchmarkIndex = asNum(val?.benchmarkIndex);
   const vsSpy = indexValue != null && benchmarkIndex != null ? indexValue - benchmarkIndex : null;
+  const benchmark = t.world === "MEMES" ? "SOL" : "SPY";
   const contrib = Array.isArray(val?.holdingContributions) ? (val.holdingContributions as HoldingContribution[]) : [];
   const spyContrib = contrib.find((c) => {
     const s = String(c.symbol ?? "").toUpperCase();
@@ -409,7 +414,7 @@ export function serializeFeedTake(t: {
     id: t.id,
     seeded: Boolean(t.seeded),
     world: t.world ?? "STOCKS",
-    chainId: t.chainId ?? 4663,
+    chainId: t.chainId ?? null,
     lens: t.lens === "SKY" ? "SKY" : "BELIEF",
     astrologySystem: t.astrologySystem === "VEDIC" || t.astrologySystem === "WESTERN" ? t.astrologySystem : null,
     astrologyChart: t.lens === "SKY" ? rev?.astrologyChart ?? null : null,
@@ -422,6 +427,7 @@ export function serializeFeedTake(t: {
         return {
           tokenId: h.tokenId,
           symbol: h.token.symbol,
+          chainId: h.token.chainId ?? t.chainId ?? null,
           weightBps: h.weightBps,
           rationale: h.rationale,
           last: c?.last ?? null,
@@ -434,6 +440,8 @@ export function serializeFeedTake(t: {
     indexValue,
     benchmarkIndex,
     vsSpy,
+    vsBenchmark: vsSpy,
+    benchmark,
     spyPublish: spyContrib?.publish ?? null,
     bookChg: indexValue != null && asNum(prev?.indexValue) != null ? indexValue - asNum(prev!.indexValue)! : null,
     asOf: val?.asOf?.toISOString() ?? null,

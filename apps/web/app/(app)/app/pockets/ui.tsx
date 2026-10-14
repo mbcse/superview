@@ -7,9 +7,14 @@ import { PaperPlaneTilt } from "@phosphor-icons/react";
 import { useAuthedFetch } from "@/components/use-authed-fetch";
 import { Button } from "@/components/ui/button";
 import { Chip, EmptyState, Notice, Surface } from "@/components/ui/surface";
-import { fmtUsd, fmtUsdDelta, fmtVs, orderStatusLabel, skipReason, tick } from "@/lib/fmt";
+import { fmtQty, fmtUsd, fmtUsdDelta, fmtVs, orderStatusLabel, skipReason, tick } from "@/lib/fmt";
+import { explorerTx } from "@takeandstake/shared";
+import { SegmentedTabs } from "@/components/data/segmented-tabs";
+import { useWalletCash } from "@/components/wallet-cash";
 import { proposalLine } from "@/lib/agent-copy";
 import { useLiveBook } from "@/lib/live-vs";
+import { useAuth } from "@/components/auth-provider";
+import { benchmarkLabel } from "@/lib/benchmark";
 import { AllocationBar } from "@/components/data/allocation-bar";
 import { AnimatedNumber } from "@/components/data/animated-number";
 import { DeltaPill } from "@/components/data/delta-pill";
@@ -25,6 +30,8 @@ type Leg = {
   mtm?: number | null;
   pnl?: number | null;
   cost?: number | null;
+  chainId?: number | null;
+  logoUrl?: string | null;
 };
 
 function liveLast(quotes: ReturnType<typeof useQuoteBook>, symbol?: string, fallback?: number | null, tokenId?: string) {
@@ -116,7 +123,10 @@ function PocketCard({
   const last = p.orders?.[0];
   const legs: Leg[] = p.mark?.legs ?? [];
   const pending = (p.proposals ?? []).filter((x: any) => x.status === "PENDING");
+  const { authProvider } = useAuth();
+  const mera = authProvider === "MERA";
   const approval = p.mandate?.mode !== "AUTO";
+  const bench = benchmarkLabel(p.take?.world);
   const [paperAmount, setPaperAmount] = useState("100");
   const cashUsd = Number(p.mark?.cashUsd ?? 0);
   const hasPosition = legs.some((l) => (l.qty ?? 0) > 0);
@@ -152,15 +162,25 @@ function PocketCard({
             <Chip tone={p.mode === "LIVE" ? "live" : "paper"}>{p.mode === "DRY_RUN" ? "Paper · not real money" : p.mode === "LIVE" ? "Live" : "Watch"}</Chip>
             <Chip>{approval ? "Ask me first" : "Agent"}</Chip>
           </div>
-          {p.mode === "LIVE" && p.take?.chainId === 101 ? (
-            <p className="mt-2 text-[12px] text-muted">Keep 0.03 SOL in the wallet for fees.</p>
-          ) : null}
           <h2 className="view mt-3 text-[16px] font-medium leading-snug tracking-[-0.015em] text-ink">
             <Link href={`/app/takes/${p.takeId}`}>{sentence}</Link>
           </h2>
           {last ? (
             <p className="mt-2 text-[13px] text-muted">
               <Link href={`/app/order/${last.id}`}>Last order · {orderStatusLabel(last.status)}</Link>
+              {(() => {
+                const tx = last.legs?.find((l: { txs?: Array<{ txHash?: string; chainId?: number }> }) => l.txs?.[0]?.txHash);
+                const hash = tx?.txs?.[0]?.txHash as string | undefined;
+                const chainId = Number(tx?.chainId ?? tx?.txs?.[0]?.chainId ?? last.legs?.[0]?.chainId ?? 0);
+                return hash && chainId ? (
+                  <>
+                    {" · "}
+                    <a href={explorerTx(chainId, hash)} target="_blank" rel="noreferrer" className="text-teal hover:underline">
+                      Explorer
+                    </a>
+                  </>
+                ) : null;
+              })()}
             </p>
           ) : null}
         </div>
@@ -181,7 +201,7 @@ function PocketCard({
           </div>
           {vs != null ? (
             <p className="mt-1 font-mono text-[12px] text-muted">
-              vs S&P 500{" "}
+              {bench}{" "}
               <TickValue
                 value={vs}
                 format={(n) => fmtVs(n)}
@@ -218,7 +238,34 @@ function PocketCard({
                   chgPct={day}
                   pnlUsd={livePnl}
                   takeId={p.takeId}
-                  chainId={p.take?.chainId}
+                  chainId={leg.chainId ?? p.take?.chainId}
+                  logoUrl={leg.logoUrl}
+                  action={
+                    p.mode === "LIVE" && qty > 0 ? (
+                      <button
+                        type="button"
+                        className="text-[12px] text-teal hover:underline"
+                        onClick={async () => {
+                          try {
+                            const j = await fetchApi<any>(`/v1/pockets/${p.id}/live-sell`, {
+                              method: "POST",
+                              body: JSON.stringify({ tokenId: leg.tokenId })
+                            });
+                            setNotice(
+                              j.status === "FAILED"
+                                ? "Sell didn’t fill."
+                                : `Sold ${leg.symbol} · ${orderStatusLabel(j.status)}`
+                            );
+                            if (j.orderId) location.href = `/app/order/${j.orderId}`;
+                          } catch {
+                            setNotice("Couldn’t sell that name.");
+                          }
+                        }}
+                      >
+                        Sell
+                      </button>
+                    ) : null
+                  }
                 />
               );
             })}
@@ -312,19 +359,65 @@ function PocketCard({
             </Button>
           </>
         ) : null}
-        <Button
-          variant="ghost"
-          onClick={async () => {
-            const next = approval ? "AUTO" : "APPROVAL";
-            const j = await fetchApi<{ mandate: { mode: string } }>(`/v1/pockets/${p.id}/mandate`, {
-              method: "POST",
-              body: JSON.stringify({ mode: next })
-            });
-            setRows((all) => all.map((x) => (x.id === p.id ? { ...x, mandate: { ...x.mandate, mode: j.mandate.mode } } : x)));
-          }}
-        >
-          {approval ? "Let the agent run" : "Ask me first"}
-        </Button>
+        {p.mode === "LIVE" ? (
+          <>
+            <Link href={`/app/takes/${p.takeId}`}>
+              <Button variant="ghost">Add</Button>
+            </Link>
+            {hasPosition ? (
+              <Button
+                variant="ghost"
+                onClick={async () => {
+                  try {
+                    const j = await fetchApi<any>(`/v1/pockets/${p.id}/live-sell`, {
+                      method: "POST",
+                      body: JSON.stringify({ all: true })
+                    });
+                    setNotice(j.status === "FAILED" ? "Sell all didn’t fill." : `Sold names · ${orderStatusLabel(j.status)}`);
+                    if (j.orderId) location.href = `/app/order/${j.orderId}`;
+                  } catch {
+                    setNotice("Couldn’t sell this view.");
+                  }
+                }}
+              >
+                Sell all names
+              </Button>
+            ) : null}
+            {cashUsd > 0 ? (
+              <Button
+                variant="ghost"
+                onClick={async () => {
+                  try {
+                    const j = await fetchApi<any>(`/v1/pockets/${p.id}/withdraw`, {
+                      method: "POST",
+                      body: JSON.stringify({ amountUsd: cashUsd })
+                    });
+                    setNotice(`Withdrew ${fmtUsd(Number(j.usd ?? cashUsd))} leftover USDC.`);
+                  } catch {
+                    setNotice("Sell names first. Withdraw only leftover cash.");
+                  }
+                }}
+              >
+                Withdraw cash
+              </Button>
+            ) : null}
+            {mera ? <p className="text-[13px] text-muted">Face ID signs every live trade. Autopilot stays off.</p> : null}
+          </>
+        ) : (
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              const next = approval ? "AUTO" : "APPROVAL";
+              const j = await fetchApi<{ mandate: { mode: string } }>(`/v1/pockets/${p.id}/mandate`, {
+                method: "POST",
+                body: JSON.stringify({ mode: next })
+              });
+              setRows((all) => all.map((x) => (x.id === p.id ? { ...x, mandate: { ...x.mandate, mode: j.mandate.mode } } : x)));
+            }}
+          >
+            {approval ? "Let the agent run" : "Ask me first"}
+          </Button>
+        )}
       </div>
       <PocketChat pocketId={p.id} initial={p.chats ?? []} fetchApi={fetchApi} />
     </Surface>
@@ -334,11 +427,13 @@ function PocketCard({
 export default function PocketsClient({ pockets }: { pockets: any[] }) {
   const fetchApi = useAuthedFetch();
   const params = useSearchParams();
+  const { wallet } = useWalletCash();
   const funded = params.get("paper");
   const [notice, setNotice] = useState<string | null>(
     funded ? `Published. $${Number(funded).toLocaleString()} paper is in this view — not real money.` : null
   );
   const [rows, setRows] = useState(pockets);
+  const [tab, setTab] = useState("Views");
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -365,36 +460,127 @@ export default function PocketsClient({ pockets }: { pockets: any[] }) {
     );
   }
 
-  const stocks = rows.filter((p) => (p.take?.world ?? "STOCKS") === "STOCKS");
-  const memes = rows.filter((p) => p.take?.world === "MEMES");
-
-  function Desk({ title, items }: { title: string; items: any[] }) {
-    const nav = items.reduce((s, p) => s + Number(p.navUsd ?? p.mark?.navUsd ?? 0), 0);
-    if (!items.length) return null;
-    return (
-      <section className="mt-10">
-        <p className="text-[11px] uppercase tracking-[0.08em] text-muted">{title}</p>
-        <p className="figure mt-2 text-[32px] text-ink md:text-[40px]">
-          <AnimatedNumber value={nav} format={(n) => fmtUsd(n)} />
-        </p>
-        <div className="mt-4 space-y-4">
-          {items.map((p) => (
-            <PocketCard key={p.id} p={p} fetchApi={fetchApi} setNotice={setNotice} setRows={setRows} />
-          ))}
-        </div>
-      </section>
-    );
+  const live = rows.filter((p) => p.mode === "LIVE");
+  const paper = rows.filter((p) => p.mode !== "LIVE");
+  const liveNav = live.reduce((s, p) => s + Number(p.navUsd ?? p.mark?.navUsd ?? 0), 0);
+  const vs = live.reduce((s, p) => s + Number(p.vsBook ?? p.mark?.vsBook ?? 0), 0);
+  const names = new Map<
+    string,
+    {
+      tokenId: string;
+      symbol: string;
+      chainId: number | null;
+      qty: number;
+      last: number | null;
+      cost: number;
+      pnl: number | null;
+      logoUrl?: string | null;
+      pocketId: string;
+      takeId?: string;
+    }
+  >();
+  for (const p of live) {
+    for (const leg of (p.mark?.legs ?? []) as Leg[]) {
+      if (!leg.tokenId || !(leg.qty ?? 0)) continue;
+      const prev = names.get(leg.tokenId);
+      names.set(leg.tokenId, {
+        tokenId: leg.tokenId,
+        symbol: leg.symbol ?? "",
+        chainId: leg.chainId ?? p.take?.chainId ?? null,
+        qty: (prev?.qty ?? 0) + (leg.qty ?? 0),
+        last: leg.last ?? prev?.last ?? null,
+        cost: (prev?.cost ?? 0) + Number(leg.cost ?? 0),
+        pnl: (prev?.pnl ?? 0) + Number(leg.pnl ?? 0),
+        logoUrl: leg.logoUrl,
+        pocketId: p.id,
+        takeId: p.takeId
+      });
+    }
   }
 
   return (
     <div>
-      <p className="text-[11px] uppercase tracking-[0.08em] text-muted">Desks</p>
-      <p className="mt-2 text-[15px] text-muted">
-        Stocks and memes stay on their own cash books. No blended total.
+      <p className="text-[11px] uppercase tracking-[0.08em] text-muted">Portfolio</p>
+      <p className="figure mt-2 text-[40px] text-ink">
+        <AnimatedNumber value={liveNav} format={(n) => fmtUsd(n)} />
       </p>
-      {notice ? <div className="mt-4"><Notice tone="ok">{notice}</Notice></div> : null}
-      <Desk title="Stocks desk" items={stocks} />
-      <Desk title="Memes desk" items={memes} />
+      <p className="mt-1 text-[13px] text-muted">
+        Available cash {fmtUsd(wallet?.homeCashUsd ?? 0)}
+        {vs ? (
+          <>
+            {" · "}
+            <TickValue value={vs} format={(n) => fmtVs(n)} color="sign" className="font-mono text-[13px]" />
+          </>
+        ) : null}
+      </p>
+      <div className="mt-5">
+        <SegmentedTabs options={["Views", "Stocks"]} value={tab} onChange={setTab} layoutId="portfolio-tab" />
+      </div>
+      {notice ? (
+        <div className="mt-4">
+          <Notice tone="ok">{notice}</Notice>
+        </div>
+      ) : null}
+      {tab === "Views" ? (
+        <>
+          <div className="mt-6 space-y-4">
+            {live.map((p) => (
+              <PocketCard key={p.id} p={p} fetchApi={fetchApi} setNotice={setNotice} setRows={setRows} />
+            ))}
+          </div>
+          {paper.length ? (
+            <section className="mt-10">
+              <p className="text-[11px] uppercase tracking-[0.08em] text-muted">Paper (not real money)</p>
+              <div className="mt-4 space-y-4 opacity-80">
+                {paper.map((p) => (
+                  <PocketCard key={p.id} p={p} fetchApi={fetchApi} setNotice={setNotice} setRows={setRows} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </>
+      ) : (
+        <Surface className="mt-6 p-6">
+          {names.size ? (
+            [...names.values()].map((row) => (
+              <HoldingRow
+                key={row.tokenId}
+                symbol={row.symbol}
+                tokenId={row.tokenId}
+                weightBps={0}
+                last={row.last}
+                pnlUsd={row.pnl}
+                takeId={row.takeId}
+                chainId={row.chainId ?? undefined}
+                logoUrl={row.logoUrl}
+                rationale={`${fmtQty(row.qty)} · cost ${fmtUsd(row.cost)}`}
+                action={
+                  <button
+                    type="button"
+                    className="text-[12px] text-teal hover:underline"
+                    onClick={async () => {
+                      try {
+                        const j = await fetchApi<any>(`/v1/pockets/${row.pocketId}/live-sell`, {
+                          method: "POST",
+                          body: JSON.stringify({ tokenId: row.tokenId })
+                        });
+                        setNotice(j.status === "FAILED" ? "Sell didn’t fill." : `Sold ${row.symbol} · ${orderStatusLabel(j.status)}`);
+                        if (j.orderId) location.href = `/app/order/${j.orderId}`;
+                      } catch {
+                        setNotice("Couldn’t sell that name.");
+                      }
+                    }}
+                  >
+                    Sell
+                  </button>
+                }
+              />
+            ))
+          ) : (
+            <p className="text-[13px] text-muted">Live names show here after a fill.</p>
+          )}
+        </Surface>
+      )}
     </div>
   );
 }

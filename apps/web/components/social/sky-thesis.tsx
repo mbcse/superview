@@ -16,7 +16,7 @@ export function SkyThesis({
 
   return (
     <div className={size === "card" ? "mt-3.5" : "mt-5"}>
-      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-teal">Sky</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-teal">Chart</p>
       {showNotes ? (
         <p
           className={cn(

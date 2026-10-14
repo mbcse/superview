@@ -1,0 +1,80 @@
+{
+  "ausd": {
+    "asset_stats": [],
+    "tokens": [
+      {
+        "assetId": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "decimals": 6,
+        "blockchain": "base",
+        "symbol": "USDC",
+        "price": 1,
+        "priceUpdatedAt": "2026-10-11T00:00:00.000Z",
+        "contractAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      },
+      {
+        "assetId": "nep141:monad-0x00000000efe302beaa2b3e6e1b18d08d69a9012a.omft.near",
+        "decimals": 6,
+        "blockchain": "monad",
+        "symbol": "AUSD",
+        "price": 1,
+        "priceUpdatedAt": "2026-10-11T00:00:00.000Z",
+        "contractAddress": "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a"
+      },
+      {
+        "assetId": "nep141:monad-0x754704bc059f8c67012fed69bc8a3278d43f6763.omft.near",
+        "decimals": 6,
+        "blockchain": "monad",
+        "symbol": "USDC",
+        "price": 1,
+        "priceUpdatedAt": "2026-10-11T00:00:00.000Z",
+        "contractAddress": "0x754704Bc059F8C67012fEd69BC8A3278d43F6763"
+      }
+    ]
+  },
+  "usdcOnly": {
+    "asset_stats": [],
+    "tokens": [
+      {
+        "assetId": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "decimals": 6,
+        "blockchain": "base",
+        "symbol": "USDC",
+        "price": 1,
+        "priceUpdatedAt": "2026-10-11T00:00:00.000Z",
+        "contractAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      },
+      {
+        "assetId": "nep141:monad-0x754704bc059f8c67012fed69bc8a3278d43f6763.omft.near",
+        "decimals": 6,
+        "blockchain": "monad",
+        "symbol": "USDC",
+        "price": 1,
+        "priceUpdatedAt": "2026-10-11T00:00:00.000Z",
+        "contractAddress": "0x754704Bc059F8C67012fEd69BC8A3278d43F6763"
+      }
+    ]
+  },
+  "neither": {
+    "asset_stats": [],
+    "tokens": [
+      {
+        "assetId": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "decimals": 6,
+        "blockchain": "base",
+        "symbol": "USDC",
+        "price": 1,
+        "priceUpdatedAt": "2026-10-11T00:00:00.000Z",
+        "contractAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      },
+      {
+        "assetId": "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near",
+        "decimals": 6,
+        "blockchain": "eth",
+        "symbol": "USDC",
+        "price": 1,
+        "priceUpdatedAt": "2026-10-11T00:00:00.000Z",
+        "contractAddress": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      }
+    ]
+  }
+}

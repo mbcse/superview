@@ -1,12 +1,19 @@
 import { createPublicClient, type Address, type PublicClient } from "viem";
 import { aggregatorV3Abi, erc8056Abi } from "./abi.js";
-import { robinhoodChain } from "./constants.js";
-import { createRhTransport } from "./rpc-pool.js";
+import { evmChainOf, robinhoodChain } from "./constants.js";
+import { createChainTransport, createRhTransport } from "./rpc-pool.js";
 
 export function createRhClient(rpcUrl?: string | readonly string[]): PublicClient {
   return createPublicClient({
     chain: robinhoodChain,
     transport: createRhTransport(rpcUrl)
+  });
+}
+
+export function createEvmClient(chainId: number, rpcUrl?: string | readonly string[]): PublicClient {
+  return createPublicClient({
+    chain: evmChainOf(chainId),
+    transport: createChainTransport(chainId, rpcUrl)
   });
 }
 

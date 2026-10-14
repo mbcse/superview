@@ -2,6 +2,16 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+async function columnExists(table: string, column: string) {
+  const rows = await prisma.$queryRaw<Array<{ exists: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ${table} AND column_name = ${column}
+    ) AS exists
+  `;
+  return Boolean(rows[0]?.exists);
+}
+
 async function tableExists(name: string) {
   const rows = await prisma.$queryRaw<Array<{ exists: boolean }>>`
     SELECT EXISTS (
@@ -93,6 +103,38 @@ async function collapseDuplicates() {
   if (merged) console.log(`migrate: merged ${merged} duplicate StockToken rows`);
 }
 
+async function backfillPaperUsdCash() {
+  if (!(await tableExists("LedgerAccount")) || !(await tableExists("Pocket"))) return;
+  const n = await prisma.$executeRaw`
+    UPDATE "LedgerAccount" AS a
+    SET "tokenId" = 'USD'
+    FROM "Pocket" p
+    WHERE a."pocketId" = p.id
+      AND a.kind = 'CASH'
+      AND p.mode = 'DRY_RUN'
+      AND a."tokenId" IN ('USDG', 'USDC:101')
+  `;
+  if (n) console.log(`migrate: paper cash -> USD on ${n} accounts`);
+}
+
+async function backfillUnderlyingTickers() {
+  if (!(await tableExists("StockToken")) || !(await columnExists("StockToken", "underlyingTicker"))) return;
+  const rows = await prisma.stockToken.findMany({
+    where: { OR: [{ underlyingTicker: null }, { underlyingTicker: "" }] },
+    select: { id: true, symbol: true, source: true }
+  });
+  let n = 0;
+  for (const row of rows) {
+    let u = row.symbol.toUpperCase();
+    if (row.source === "ROBINHOOD" && u.startsWith("RH") && u.length > 2) u = u.slice(2);
+    if (row.source === "XSTOCKS" && u.endsWith("X") && u.length > 1) u = u.slice(0, -1);
+    if (row.source === "COINBASE" && u.endsWith("C") && u.length > 1) u = u.slice(0, -1);
+    await prisma.stockToken.update({ where: { id: row.id }, data: { underlyingTicker: u } });
+    n += 1;
+  }
+  if (n) console.log(`migrate: filled underlyingTicker on ${n} tokens`);
+}
+
 async function main() {
   if (!(await tableExists("StockToken"))) {
     console.log("migrate: StockToken not created yet");
@@ -100,6 +142,8 @@ async function main() {
   }
   await uniquifyBlankAddresses();
   await collapseDuplicates();
+  await backfillPaperUsdCash();
+  await backfillUnderlyingTickers();
 }
 
 main()

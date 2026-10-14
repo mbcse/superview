@@ -25,10 +25,12 @@ import {
   SOLANA_CAIP2,
   SOLANA_CHAIN_ID,
   SOL_RESERVE,
-  cashTokenId,
+  cashTokenIdForChain,
+  executorFor,
   log,
   logError
 } from "@takeandstake/shared";
+import { assertLiveAllowed, groupHoldingsByChain, isDustLeg } from "@takeandstake/core";
 
 const env = loadEnv();
 const LAMPORTS_RESERVE = Math.round(SOL_RESERVE * 1e9);
@@ -103,6 +105,8 @@ export async function handleExecutionJob(data: {
   orderId?: string;
 }) {
   await reconcileSubmitted();
+  const mera = await prisma.wallet.findFirst({ where: { userId: data.userId, provider: "MERA", privyWalletId: null } });
+  if (mera) return { error: "mera_requires_client_sign" };
   if (data.kind === "WITHDRAW") return handleSolanaWithdraw(data);
   const pocket = await prisma.pocket.findUnique({
     where: { id: data.pocketId },
@@ -119,14 +123,56 @@ export async function handleExecutionJob(data: {
     }
   });
   if (!pocket || pocket.userId !== data.userId) return { error: "not_found" };
-  if (pocket.take.chainId === 4663) {
+  const target0 = pocket.take.revisions[0]?.target;
+  if (!target0) return { error: "no_target" };
+  const groups = groupHoldingsByChain(target0.holdings);
+  const user = await prisma.user.findUnique({ where: { id: data.userId } });
+  if (!user) return { error: "not_found" };
+  const evmOnly = [...groups.keys()].filter((id) => id !== SOLANA_CHAIN_ID);
+  if (!groups.has(SOLANA_CHAIN_ID) && evmOnly.length === 1) {
+    const chainId = evmOnly[0]!;
+    try {
+      executorFor(chainId);
+    } catch {
+      return { error: "venue_not_live" };
+    }
+    const allowed = await assertLiveAllowed({ chainId, world: pocket.take.world, user, env });
+    if (!allowed.ok) return { error: allowed.error };
     const { runLiveInvest } = await import("../../api/src/services/live-invest.js");
-    return runLiveInvest(data.pocketId, env, data.userId, data.amountUsd);
+    return runLiveInvest(data.pocketId, env, data.userId, data.amountUsd, { chainId, orderId: data.orderId });
   }
-  const flag = await prisma.featureFlag.findUnique({
-    where: { key: pocket.take.world === "MEMES" ? "live_trading_memes" : "live_trading_xstocks" }
-  });
-  if (!flag?.enabled) return { error: "live_disabled" };
+  if (!groups.has(SOLANA_CHAIN_ID)) {
+    const { runLiveInvest } = await import("../../api/src/services/live-invest.js");
+    let filled = 0;
+    let skipped = 0;
+    let orderId = data.orderId;
+    for (const chainId of evmOnly) {
+      try {
+        executorFor(chainId);
+      } catch {
+        skipped += target0.holdings.filter((h) => h.token.chainId === chainId).length;
+        continue;
+      }
+      const allowed = await assertLiveAllowed({ chainId, world: pocket.take.world, user, env });
+      if (!allowed.ok) {
+        skipped += target0.holdings.filter((h) => h.token.chainId === chainId).length;
+        continue;
+      }
+      const evm = await runLiveInvest(data.pocketId, env, data.userId, data.amountUsd, { chainId, orderId });
+      if (evm && "orderId" in evm && evm.orderId) orderId = evm.orderId;
+      if (evm && "error" in evm) {
+        skipped += target0.holdings.filter((h) => h.token.chainId === chainId).length;
+        continue;
+      }
+      if (evm && "fills" in evm) filled += Number(evm.fills ?? 0);
+      if (evm && "skipped" in evm) skipped += Number(evm.skipped ?? 0);
+    }
+    const status = filled === 0 ? "FAILED" : skipped > 0 ? "PARTIAL" : "FILLED";
+    if (orderId) await prisma.order.update({ where: { id: orderId }, data: { status } }).catch(() => undefined);
+    return { orderId, filled, skipped, status };
+  }
+  const solAllowed = await assertLiveAllowed({ chainId: SOLANA_CHAIN_ID, world: pocket.take.world, user, env });
+  if (!solAllowed.ok) return { error: solAllowed.error };
   const wallet = await prisma.wallet.findFirst({
     where: { userId: data.userId, chainId: SOLANA_CHAIN_ID },
     include: { signerGrants: { where: { revokedAt: null }, take: 1 } }
@@ -138,14 +184,14 @@ export async function handleExecutionJob(data: {
   if (!target) return { error: "no_target" };
 
   const lamports = await getBalanceLamports(wallet.address);
-  if (lamports == null || lamports < LAMPORTS_RESERVE) {
-    return { error: "top_up_sol", reserveSol: SOL_RESERVE };
-  }
+  const needSol = env.PRIVY_GAS_SPONSORED === "0" && (lamports == null || lamports < LAMPORTS_RESERVE);
 
+  const { ensureDeskCash } = await import("../../api/src/services/privy-transfer.js");
+  await ensureDeskCash({ env, userId: data.userId, destChainId: SOLANA_CHAIN_ID, needUsd: Math.min(data.amountUsd ?? env.LIVE_MAX_TRADE_USD, env.LIVE_MAX_TRADE_USD) });
   const capTrade = pocket.take.world === "MEMES" ? LIVE_MAX_TRADE_USD_MEMES : env.LIVE_MAX_TRADE_USD;
   const capDay = pocket.take.world === "MEMES" ? LIVE_DAILY_CAP_USD_MEMES : env.LIVE_DAILY_CAP_USD;
   const spend = Math.min(data.amountUsd ?? capTrade, capDay);
-  const idempotencyKey = data.idempotencyKey ?? `live:${pocket.id}:${Math.round(spend * 100)}`;
+  const idempotencyKey = data.idempotencyKey ?? `live:${pocket.id}:${Math.round(spend * 100)}:${SOLANA_CHAIN_ID}`;
   const existing = data.orderId
     ? await prisma.order.findUnique({ where: { id: data.orderId } })
     : await prisma.order.findUnique({ where: { idempotencyKey } });
@@ -163,7 +209,7 @@ export async function handleExecutionJob(data: {
         idempotencyKey
       }
     }));
-  const cashId = cashTokenId(pocket.take.world, pocket.take.chainId);
+  const cashId = cashTokenIdForChain(SOLANA_CHAIN_ID);
   const cash = await prisma.ledgerAccount.upsert({
     where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "CASH", tokenId: cashId } },
     update: {},
@@ -172,8 +218,22 @@ export async function handleExecutionJob(data: {
 
   let filled = 0;
   let skipped = 0;
-  for (const h of target.holdings) {
+  for (const h of target.holdings.filter((row) => row.token.chainId === SOLANA_CHAIN_ID)) {
     const usd = (spend * h.weightBps) / 10_000;
+    if (isDustLeg(usd)) {
+      skipped += 1;
+      await prisma.orderLeg.create({
+        data: { orderId: order.id, side: "BUY", tokenId: h.tokenId, sellAmount: String(Math.round(usd * 1e6)), status: "SKIPPED", skipReason: "dust" }
+      });
+      continue;
+    }
+    if (needSol) {
+      skipped += 1;
+      await prisma.orderLeg.create({
+        data: { orderId: order.id, side: "BUY", tokenId: h.tokenId, sellAmount: String(Math.round(usd * 1e6)), status: "SKIPPED", skipReason: "top_up_sol" }
+      });
+      continue;
+    }
     const skip = async (reason: string) => {
       skipped += 1;
       await prisma.orderLeg.create({
@@ -295,9 +355,31 @@ export async function handleExecutionJob(data: {
     });
     filled += 1;
   }
+  for (const [chainId] of groups) {
+    if (chainId === SOLANA_CHAIN_ID) continue;
+    try {
+      executorFor(chainId);
+    } catch {
+      skipped += target.holdings.filter((h) => h.token.chainId === chainId).length;
+      continue;
+    }
+    const allowed = await assertLiveAllowed({ chainId, world: pocket.take.world, user, env });
+    if (!allowed.ok) {
+      skipped += target.holdings.filter((h) => h.token.chainId === chainId).length;
+      continue;
+    }
+    const { runLiveInvest } = await import("../../api/src/services/live-invest.js");
+    const evm = await runLiveInvest(data.pocketId, env, data.userId, data.amountUsd, { chainId, orderId: order.id });
+    if (evm && "error" in evm) {
+      skipped += target.holdings.filter((h) => h.token.chainId === chainId).length;
+      continue;
+    }
+    if (evm && "fills" in evm) filled += Number(evm.fills ?? 0);
+    if (evm && "skipped" in evm) skipped += Number(evm.skipped ?? 0);
+  }
   const status = filled === 0 ? "FAILED" : skipped > 0 ? "PARTIAL" : "FILLED";
   await prisma.order.update({ where: { id: order.id }, data: { status } });
-  log("worker", "solana live", { order: order.id, filled, skipped, reserveSol: SOL_RESERVE });
+  log("worker", "multileg live", { order: order.id, filled, skipped, reserveSol: SOL_RESERVE });
   return { orderId: order.id, filled, skipped, status };
 }
 

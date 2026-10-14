@@ -7,6 +7,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AuthProvider {
+  PRIVY
+  MERA
+  DEMO
+}
+
+enum WalletProvider {
+  PRIVY
+  MERA
+  EXTERNAL
+}
+
+enum SignerKind {
+  PRIVY
+  MERA
+}
+
 enum WalletType {
   EMBEDDED
   SMART
@@ -29,6 +46,7 @@ enum AssetSource {
   XSTOCKS
   BAGS
   PUMPFUN
+  COINBASE
   OTHER
 }
 
@@ -38,6 +56,8 @@ enum Venue {
   PUMP_CURVE
   PUMPSWAP
   AMM
+  ZEROX_EVM
+  KURU_FLOW
 }
 
 enum PriceSource {
@@ -48,6 +68,9 @@ enum PriceSource {
   BAGS
   PUMPFUN
   DEXSCREENER
+  AERODROME
+  KURU
+  ISSUER
 }
 
 enum TakeStatus {
@@ -175,6 +198,7 @@ enum OrderKind {
 enum OrderStatus {
   DRAFT
   PENDING_APPROVAL
+  AWAITING_SIGNATURE
   APPROVED
   SUBMITTING
   FILLED
@@ -191,6 +215,7 @@ enum Side {
 enum LegStatus {
   PENDING
   QUOTED
+  AWAITING_SIGNATURE
   SUBMITTED
   FILLED
   FAILED
@@ -268,7 +293,9 @@ enum JurisdictionStatus {
 
 model User {
   id                      String              @id @default(cuid())
-  privyId                 String              @unique
+  privyId                 String?             @unique
+  authProvider            AuthProvider        @default(PRIVY)
+  meraCredentialId        String?             @unique
   handle                  String              @unique
   displayName             String
   avatar                  String?
@@ -302,8 +329,9 @@ model Wallet {
   user            User             @relation(fields: [userId], references: [id])
   address         String
   privyWalletId   String?
+  provider        WalletProvider   @default(PRIVY)
   type            WalletType       @default(EMBEDDED)
-  chainId         Int              @default(4663)
+  chainId         Int
   isPrimary       Boolean          @default(true)
   sanctions       SanctionsCheck[]
   deposits        Deposit[]
@@ -313,6 +341,7 @@ model Wallet {
 
   @@unique([address, chainId])
   @@unique([privyWalletId])
+  @@unique([userId, chainId, provider])
 }
 
 model SanctionsCheck {
@@ -348,6 +377,7 @@ model StockToken {
   decimals             Int              @default(18)
   tokenProgram         String?
   xstocksSymbol        String?
+  underlyingTicker     String?
   liquidityUsd         Decimal?         @db.Decimal(38, 2)
   holderCount          Int?
   riskFlags            Json?
@@ -377,6 +407,7 @@ model StockToken {
   @@index([world, symbol])
   @@index([symbol, chainId])
   @@index([contractAddress])
+  @@index([underlyingTicker])
 }
 
 model UniverseCompany {
@@ -448,7 +479,8 @@ model ResearchRun {
   take              Take?            @relation(fields: [takeId], references: [id])
   takeRevisionId    String?
   world             World            @default(STOCKS)
-  chainId           Int              @default(4663)
+  chainId           Int?
+  allowedChains     Json?
   status            ResearchStatus   @default(PENDING)
   stage             String           @default("queued")
   catalogSnapshotId String?
@@ -523,6 +555,7 @@ model CandidateCompany {
   reasonNotHoldable String?
   provider         String
   providerRef      String?
+  venueOptions     Json?
   claims           Claim[]
   score            ExposureScore?
 }
@@ -596,7 +629,7 @@ model Take {
   circleId          String?
   circle            Circle?           @relation(fields: [circleId], references: [id])
   world             World             @default(STOCKS)
-  chainId           Int               @default(4663)
+  chainId           Int?
   lens              TakeLens          @default(BELIEF)
   astrologySystem   AstrologySystem?
   status            TakeStatus        @default(DRAFT)
@@ -809,7 +842,8 @@ model SignerGrant {
   id               String    @id @default(cuid())
   walletId         String
   wallet           Wallet    @relation(fields: [walletId], references: [id])
-  privySignerId    String
+  privySignerId    String?
+  provider         SignerKind @default(PRIVY)
   policyId         String?
   allowedContracts Json
   maxPerTxUsd      Decimal   @db.Decimal(38, 18)
@@ -937,6 +971,8 @@ model OrderLeg {
   order         Order      @relation(fields: [orderId], references: [id])
   side          Side
   tokenId       String
+  chainId       Int?
+  walletId      String?
   sellAmount    Decimal    @db.Decimal(78, 0)
   minBuyAmount  Decimal?   @db.Decimal(78, 0)
   status        LegStatus  @default(PENDING)
@@ -964,6 +1000,8 @@ model ChainTx {
   leg                OrderLeg?  @relation(fields: [legId], references: [id])
   withdrawalId       String?
   privyTransactionId String?
+  chainId            Int?
+  signer             SignerKind?
   txHash             String?
   status             String
   blockNumber        BigInt?
@@ -1144,6 +1182,7 @@ model TakeValuation {
   asOf                 DateTime
   indexValue           Decimal      @db.Decimal(38, 18)
   benchmarkIndex       Decimal      @db.Decimal(38, 18)
+  benchmark            String       @default("SPY")
   benchmarkAssetId     String?
   holdingContributions Json?
   isDaily              Boolean      @default(false)

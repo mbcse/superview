@@ -32,7 +32,7 @@ function SampleViewStack() {
 }
 
 export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
-  const { login, authenticated, ready } = useAuth();
+  const { login, loginMera, authenticated, ready } = useAuth();
   const router = useRouter();
   const next = useSearchParams().get("next") ?? "/app";
   const privy = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
@@ -84,9 +84,14 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
             {privy ? (
               <PrivyLoginButtons disabled={!ready} />
             ) : (
-              <Button variant="primary" size="lg" className="h-12 w-full" onClick={() => void go()} disabled={!ready}>
-                {mode === "login" ? "Sign in" : "Create account"}
-              </Button>
+              <div className="flex flex-col gap-3">
+                <Button variant="primary" size="lg" className="h-12 w-full" onClick={() => void loginMera()} disabled={!ready}>
+                  Continue with Face ID
+                </Button>
+                <Button variant="secondary" size="lg" className="h-12 w-full" onClick={() => void go()} disabled={!ready}>
+                  {mode === "login" ? "Sign in" : "Create account"}
+                </Button>
+              </div>
             )}
           </div>
           <p className="mt-6 text-center text-[12px] text-muted">

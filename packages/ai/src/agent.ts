@@ -53,19 +53,20 @@ export async function runDailyMonitor(takeId: string) {
     schema: monitorSchema,
     prompt: fill(MONITOR_PROMPT, {
       thesis: JSON.stringify({ sentence: rev?.sentence, thesis: rev?.researchRun?.thesis }),
-      positions: JSON.stringify(holdings.map((h) => ({ symbol: h.token.symbol, weightBps: h.weightBps }))),
+      positions: JSON.stringify(holdings.map((h) => ({ tokenId: h.tokenId, symbol: h.token.symbol, chainId: h.token.chainId, weightBps: h.weightBps }))),
       evidence,
       sky,
       mandate: mandateLabel,
       driftThreshold: "200 bps"
     })
   });
+  const byToken = new Map(holdings.map((h) => [h.tokenId, h]));
   const bySymbol = new Map(holdings.map((h) => [h.token.symbol.toUpperCase(), h]));
   const proposal = {
     noChange: out.decision === "no_change",
     cashBps: rev?.target?.cashBps ?? 500,
     holdings: out.trades.map((t) => ({
-      tokenId: bySymbol.get(t.symbol.toUpperCase())?.tokenId ?? t.symbol,
+      tokenId: byToken.get(t.symbol)?.tokenId ?? bySymbol.get(t.symbol.toUpperCase())?.tokenId ?? t.symbol,
       action: (t.action === "exit" ? "remove" : t.action === "add" ? "add" : t.action === "trim" || t.action === "decrease" ? "decrease" : "increase") as
         | "keep"
         | "increase"

@@ -9,6 +9,7 @@ import { useLiveQuote } from "@/components/social/price-stream";
 import { useStockSheet } from "@/components/social/stock-sheet";
 import { CommentsButton, useViewComments } from "@/components/social/view-chat";
 import { fmtAgo, fmtPooled } from "@/lib/fmt";
+import { ChainChip, resolveChainId } from "@/components/data/chain-mark";
 import { TokenMark, stockTick } from "@/components/data/token-mark";
 import { fmtVsLabel, useLiveVsSpy } from "@/lib/live-vs";
 import { TickValue } from "@/components/data/tick-value";
@@ -24,7 +25,7 @@ export type FeedTake = {
   avatar?: string | null;
   handle?: string | null;
   createdAt?: string;
-  holdings: Array<{ tokenId?: string; symbol: string; weightBps: number; last?: number | null; publish?: number | null; chgPct?: number | null; logoUrl?: string | null; rationale?: string | null }>;
+  holdings: Array<{ tokenId?: string; symbol: string; chainId?: number | null; weightBps: number; last?: number | null; publish?: number | null; chgPct?: number | null; logoUrl?: string | null; rationale?: string | null }>;
   vsSpy: number | null;
   world?: "STOCKS" | "MEMES";
   chainId?: number;
@@ -180,7 +181,7 @@ export function TakeCard({
         </div>
         <div className="flex gap-1.5 overflow-x-auto border-t border-teal/10 px-2 py-2 hide-scroll">
           {take.holdings.map((h) => (
-            <HoldingChip key={h.symbol} holding={h} takeId={take.id} chainId={take.chainId} />
+            <HoldingChip key={`${h.tokenId ?? h.symbol}-${h.chainId ?? take.chainId}`} holding={h} takeId={take.id} chainId={h.chainId ?? take.chainId} />
           ))}
         </div>
         <Link
@@ -271,6 +272,7 @@ function HoldingChip({
   const q = useLiveQuote(holding.symbol, holding.tokenId);
   const { openStock } = useStockSheet();
   const last = q?.last ?? holding.last;
+  const desk = resolveChainId(holding.symbol, chainId, holding.logoUrl);
   return (
     <button
       type="button"
@@ -280,13 +282,14 @@ function HoldingChip({
           rationale: holding.rationale,
           weightBps: holding.weightBps,
           whyInBasket: holding.rationale,
-          chainId
+          chainId: desk
         })
       }
       className="flex shrink-0 items-center gap-1.5 rounded-lg border border-teal/12 bg-white/70 py-1 pl-1 pr-2 text-left hover:border-teal/35"
     >
-      <TokenMark symbol={holding.symbol} logoUrl={holding.logoUrl} chainId={chainId} size={24} />
-      <span className="text-[12px] font-semibold">{stockTick(holding.symbol, chainId)}</span>
+      <TokenMark symbol={holding.symbol} logoUrl={holding.logoUrl} chainId={desk} size={24} />
+      <span className="text-[12px] font-semibold">{stockTick(holding.symbol, desk, holding.logoUrl)}</span>
+      <ChainChip chainId={desk} className="hidden sm:inline-flex" />
       {last != null ? (
         <LivePrice last={last} chgPct={q?.chgPct} pulse={q?.seq} className="px-0 text-[11px]" />
       ) : null}

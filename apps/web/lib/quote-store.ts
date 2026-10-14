@@ -37,11 +37,19 @@ const bySymbol = new Map<string, Set<Listener>>();
 const wanted = new Set<string>(["SPY", "RHSPY"]);
 const wantedListeners = new Set<Listener>();
 
+function companyKey(symbol: string) {
+  if (/[xc]$/.test(symbol)) return symbol.slice(0, -1).toUpperCase();
+  const u = symbol.toUpperCase();
+  if (u.length > 20) return u;
+  return u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
+}
+
 function keysFor(symbol: string) {
   const u = symbol.toUpperCase();
   if (u.length > 20) return [u];
+  const company = companyKey(symbol);
   const bare = u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
-  return [...new Set([u, bare, `RH${bare}`].filter(Boolean))];
+  return [...new Set([u, bare, `RH${bare}`, company, `RH${company}`])].filter(Boolean);
 }
 
 function notify(keys: string[]) {
@@ -72,8 +80,9 @@ export function getQuote(symbol?: string | null, tokenId?: string | null): LiveQ
   if (!symbol) return null;
   const u = symbol.toUpperCase();
   if (u.length > 20) return snapshot[u] ?? snapshot[symbol] ?? null;
+  const company = companyKey(symbol);
   const bare = u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
-  return snapshot[u] ?? snapshot[`RH${bare}`] ?? snapshot[bare] ?? snapshot[tokenId ?? ""] ?? null;
+  return snapshot[u] ?? snapshot[company] ?? snapshot[`RH${company}`] ?? snapshot[`RH${bare}`] ?? snapshot[bare] ?? snapshot[tokenId ?? ""] ?? null;
 }
 
 export function getQuoteBook() {
@@ -107,15 +116,18 @@ export function applyQuotes(list: LiveQuote[]) {
   for (const raw of list) {
     const u = raw.symbol.toUpperCase();
     const id = raw.tokenId?.toUpperCase();
+    const company = companyKey(raw.symbol);
     const bare = u.length > 20 ? "" : u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
-    const merged = mergeQuote(snapshot[id ?? ""] ?? snapshot[u] ?? snapshot[bare], { ...raw, symbol: u });
+    const merged = mergeQuote(snapshot[id ?? ""] ?? snapshot[u] ?? snapshot[company] ?? snapshot[bare], { ...raw, symbol: u });
     if (!merged.changed) continue;
     if (!next) next = { ...snapshot };
     next[u] = merged.quote;
     if (id) next[id] = merged.quote;
-    if (bare) next[bare] = { ...merged.quote, symbol: bare };
+    if (company) next[company] = { ...merged.quote, symbol: company };
+    if (bare && bare !== company) next[bare] = { ...merged.quote, symbol: bare };
     dirty.add(u);
     if (id) dirty.add(id);
+    if (company) dirty.add(company);
     if (bare) dirty.add(bare);
   }
   if (!next) return;

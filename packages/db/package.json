@@ -8,7 +8,7 @@
   },
   "scripts": {
     "generate": "prisma generate",
-    "migrate": "tsx src/migrate.ts && prisma db push --accept-data-loss --skip-generate",
+    "migrate": "prisma db push --accept-data-loss --skip-generate && tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
     "build": "prisma generate",
     "lint": "tsc -p tsconfig.json --noEmit"

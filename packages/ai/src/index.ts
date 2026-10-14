@@ -2,6 +2,8 @@ export { thesisSpecSchema, type ThesisSpec } from "./thesis-schema.js";
 export { decomposeTake } from "./decompose-take.js";
 export { runWebDiligence, runWebDiscover, runWebNews } from "./web-research.js";
 export { matchNameToUniverse, type UniverseRow } from "./universe-match.js";
+export { routeBasket, assertOneCompanyOnce, listingFromToken, bookLiquidity } from "./venue.js";
+export { collapseTokensByCompany, companyKey, pickScreenUniverse, catalogCensus } from "./company-universe.js";
 export { pickPortfolioHoldings, type PickedHolding } from "./portfolio-pick.js";
 export { criticModel, fastModel, researchModel, researchResponsesModel, socialModel, describeLlm, modelIdOf } from "./llm.js";
 export { ResearchConfigError } from "./errors.js";

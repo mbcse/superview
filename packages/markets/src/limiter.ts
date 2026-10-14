@@ -68,6 +68,10 @@ export const LIMITS = {
   bags: { rps: 1.3, burst: 4 },
   dexscreener: { rps: 5, burst: 8 },
   xstocks: { rps: 0.4, burst: 2 },
+  coinbase: { rps: 1, burst: 2 },
   pump: { rps: 2, burst: 4 },
-  solana: { rps: 8, burst: 12 }
+  solana: { rps: 8, burst: 12 },
+  kuru: { rps: 1, burst: 2 },
+  aurora: { rps: 1, burst: 2 },
+  nansen: { rps: 1, burst: 2 }
 } as const;

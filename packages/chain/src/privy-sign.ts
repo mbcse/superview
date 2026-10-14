@@ -60,6 +60,10 @@ export function privyWalletRpcUrl(privyWalletId: string) {
   return `https://api.privy.io/v1/wallets/${privyWalletId}/rpc`;
 }
 
+export function privyWalletTransferUrl(privyWalletId: string) {
+  return `https://api.privy.io/v1/wallets/${privyWalletId}/transfer`;
+}
+
 export function hashIdempotency(parts: string[]) {
   return createHash("sha256").update(parts.join(":")).digest("hex").slice(0, 32);
 }

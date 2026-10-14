@@ -1,15 +1,26 @@
 import { prisma, Prisma } from "@takeandstake/db";
-import { fetchZeroXQuote, quoteUsdPerToken, ROBINHOOD_CHAIN_ID, USDG_MAINNET } from "@takeandstake/chain";
+import { AUSD_MONAD, USDC_BASE, USDG_MAINNET, fetchZeroXQuote, quoteUsdPerToken } from "@takeandstake/chain";
 import { applyFill } from "./ledger.js";
 import { canonicalReceipt } from "../takes/receipt.js";
 import { computePocketMark } from "./tick.js";
 import { latestPrice } from "../market/prices.js";
 import { planRebalanceTrades } from "./rebalance.js";
 import { oracleBand, quoteWithinOracle } from "../execution/checks.js";
-import { cashTokenId, displaySymbol, logError, MEME_MAX_POOL_SHARE, MEME_STALE_MS, type World } from "@takeandstake/shared";
+import {
+  PAPER_USD_DECIMALS,
+  PAPER_USD_TOKEN_ID,
+  chainOfOrNull,
+  displaySymbol,
+  isEvmChain,
+  isSolanaChain,
+  logError,
+  MEME_MAX_POOL_SHARE,
+  MEME_STALE_MS,
+  type World
+} from "@takeandstake/shared";
 
-function paperCashId(take?: { world?: World; chainId?: number } | null) {
-  return take ? cashTokenId(take.world ?? "STOCKS", take.chainId ?? 4663) : "USDG";
+export function paperCashId(_take?: { world?: World; chainId?: number | null } | null) {
+  return PAPER_USD_TOKEN_ID;
 }
 
 export type PaperEnv = {
@@ -17,7 +28,7 @@ export type PaperEnv = {
   ORACLE_MAX_DEVIATION?: number;
 };
 
-const USDG_DECIMALS = 6;
+const USDG_DECIMALS = PAPER_USD_DECIMALS;
 
 function isHexAddress(addr: string) {
   return /^0x[0-9a-fA-F]{40}$/.test(addr);
@@ -106,7 +117,7 @@ async function priceForToken(
   sellMicroUsd: bigint,
   contractAddress: string,
   decimals = 18,
-  tokenMeta?: { venue?: string | null; source?: string | null; world?: World | null }
+  tokenMeta?: { venue?: string | null; source?: string | null; world?: World | null; chainId?: number | null }
 ) {
   const snap = await latestPrice(tokenId);
   const rhAsk = snap ? Number(snap.ask ?? snap.price) : null;
@@ -118,14 +129,15 @@ async function priceForToken(
   if (rhAsk == null && oracle == null && isHexAddress(contractAddress)) return { skip: "no_price" as const };
 
   let implied = rhAsk ?? oracle ?? 0;
-  if (!(implied > 0) && !isHexAddress(contractAddress)) {
+  const tokenChain = tokenMeta?.chainId ?? (isHexAddress(contractAddress) ? undefined : 101);
+  if (!(implied > 0) && tokenChain != null && isSolanaChain(tokenChain)) {
     try {
       const { bagsTradeQuote, jupiterSwapQuote, pumpCurveQuotes, jupiterPrices } = await import("@takeandstake/markets");
       const usd = Number(sellMicroUsd) / 1e6;
       const asset = {
         id: tokenId,
         symbol: tokenId,
-        chainId: 101,
+        chainId: tokenChain,
         contractAddress,
         decimals,
         venue: tokenMeta?.venue as never,
@@ -163,12 +175,43 @@ async function priceForToken(
   let quoteJson: object = { mode: "paper_mark", priceUsd: implied };
   const maxDev = env.ORACLE_MAX_DEVIATION ?? oracleBand(tokenMeta?.world, tokenMeta?.source);
 
-  if (env.ZEROX_API_KEY && isHexAddress(contractAddress) && sellMicroUsd > 0n) {
+  if (tokenChain === 143 && isHexAddress(contractAddress) && sellMicroUsd > 0n) {
     try {
+      const { kuruFlowQuote } = await import("@takeandstake/markets");
+      const kuru = await kuruFlowQuote({
+        asset: {
+          id: tokenId,
+          symbol: tokenId,
+          chainId: tokenChain,
+          contractAddress,
+          decimals
+        },
+        side: "BUY",
+        amountUsd: Number(sellMicroUsd) / 1e6,
+        owner: "",
+        sellAmount: sellMicroUsd.toString()
+      });
+      if (kuru && Number(kuru.outAmount) > 0) {
+        implied = Number(kuru.inAmount) / 1e6 / (Number(kuru.outAmount) / 10 ** decimals);
+        if (oracle != null && !quoteWithinOracle(implied, oracle, maxDev)) {
+          return { skip: "oracle_offside" as const };
+        }
+        buyAmount = kuru.outAmount;
+        quoteJson = kuru as object;
+      }
+    } catch {
+      /* keep mark */
+    }
+  }
+  if (env.ZEROX_API_KEY && tokenChain != null && isEvmChain(tokenChain) && isHexAddress(contractAddress) && sellMicroUsd > 0n && (quoteJson as { route?: string }).route !== "KURU_FLOW") {
+    try {
+      const cash =
+        chainOfOrNull(tokenChain)?.cash.address ??
+        (tokenChain === 8453 ? USDC_BASE : tokenChain === 143 ? AUSD_MONAD : USDG_MAINNET);
       const quote = await fetchZeroXQuote({
         apiKey: env.ZEROX_API_KEY,
-        chainId: ROBINHOOD_CHAIN_ID,
-        sellToken: USDG_MAINNET,
+        chainId: tokenChain,
+        sellToken: cash,
         buyToken: contractAddress,
         sellAmount: sellMicroUsd.toString(),
         firm: false
@@ -461,7 +504,7 @@ export async function runDryRunInvest(pocketId: string, env: PaperEnv) {
         fills: prepared,
         tx
       });
-      return { orderId: order.id, ...result, currency: "Paper USDG" };
+      return { orderId: order.id, ...result, currency: "Paper USD" };
     });
   } catch (err) {
     if (err instanceof PocketLockError) return { error: "not_found" as const };
@@ -664,7 +707,7 @@ export async function executePaperRebalance(
     targetId: target.id,
     revisionId: revision.id,
     ...result,
-    currency: "Paper USDG"
+    currency: "Paper USD"
   };
     });
   } catch (err) {

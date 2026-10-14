@@ -7,6 +7,7 @@ export default async function PublicTakePage({ params }: { params: Promise<{ id:
   try {
     const data: {
       take: {
+        world?: string;
         chainId?: number;
         lens?: string;
         astrologySystem?: string | null;
@@ -42,6 +43,7 @@ export default async function PublicTakePage({ params }: { params: Promise<{ id:
         agentLine={agentLine}
         holdings={holdings}
         chainId={data.take.chainId}
+        world={data.take.world}
       />
     );
   } catch {

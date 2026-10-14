@@ -24,11 +24,22 @@ describe("optimizer", () => {
     expect(result.holdings.length).toBeGreaterThanOrEqual(5);
   });
 
-  it("refuses thin universes", () => {
-    const result = constructPortfolio([
-      { tokenId: "a", symbol: "A", actionId: "x", exposure: 0.5, confidence: 0.5 }
-    ]);
+  it("refuses an empty universe", () => {
+    const result = constructPortfolio([]);
     expect(result.ok).toBe(false);
+  });
+
+  it("equal-weights a thin theme instead of failing min holdings", () => {
+    const result = constructPortfolio([
+      { tokenId: "a", symbol: "AAPL", actionId: "a", exposure: 0.8, confidence: 0.8, role: "direct" },
+      { tokenId: "b", symbol: "COST", actionId: "b", exposure: 0.7, confidence: 0.7, role: "indirect" },
+      { tokenId: "c", symbol: "WMT", actionId: "c", exposure: 0.6, confidence: 0.7, role: "shared_interest" }
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.holdings).toHaveLength(3);
+    const sum = result.holdings.reduce((s, h) => s + h.weightBps, 0) + result.cashBps;
+    expect(sum).toBe(10_000);
   });
 
   it("equal-weights a single-sector theme instead of failing min holdings", () => {

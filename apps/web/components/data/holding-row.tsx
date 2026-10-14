@@ -1,7 +1,9 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { fmtPx, fmtPct, fmtUsdDelta } from "@/lib/fmt";
+import { ChainChip, resolveChainId } from "@/components/data/chain-mark";
 import { TokenMark, stockTick } from "@/components/data/token-mark";
 import { cn } from "@/lib/cn";
 import { RoleChip } from "@/components/social/role-chip";
@@ -34,7 +36,8 @@ export function HoldingRow({
   liquidityUsd,
   launchedAt,
   noExit,
-  chainId
+  chainId,
+  action
 }: {
   symbol: string;
   tokenId?: string;
@@ -53,6 +56,7 @@ export function HoldingRow({
   launchedAt?: string | Date | null;
   noExit?: boolean;
   chainId?: number;
+  action?: ReactNode;
 }) {
   const reduce = useReducedMotion();
   const live = useLiveQuote(symbol, tokenId);
@@ -60,7 +64,8 @@ export function HoldingRow({
   const meta: StockMeta = { takeId, rationale, role, weightBps, whyInBasket: whyInBasket ?? rationale, chainId };
   const mark = live?.last ?? last;
   const move = live?.chgPct ?? chgPct;
-  const name = stockTick(symbol, chainId);
+  const desk = resolveChainId(symbol, chainId, logoUrl);
+  const name = stockTick(symbol, desk, logoUrl);
   const pct = weightBps / 100;
 
   return (
@@ -79,17 +84,18 @@ export function HoldingRow({
         live?.stale ? "opacity-45" : null
       )}
     >
-      <TokenMark symbol={symbol} logoUrl={logoUrl} chainId={chainId} size={32} />
+      <TokenMark symbol={symbol} logoUrl={logoUrl} chainId={desk} size={32} />
       <div className="min-w-0">
-        <p className="flex items-center gap-2 font-medium">
+        <p className="flex flex-wrap items-center gap-1.5 font-medium">
           {name}
+          <ChainChip chainId={desk} />
           {role ? <RoleChip role={role} /> : null}
         </p>
         {rationale ? <p className="truncate text-[13px] text-muted">{rationale}</p> : null}
         {venue || liquidityUsd != null || noExit ? (
           <p className="mt-0.5 truncate text-[11px] text-muted">
             {[
-              venue === "PUMP_CURVE" || venue === "BAGS_CURVE" ? "curve" : venue === "PUMPSWAP" || venue === "AMM" ? "graduated" : null,
+              venue === "PUMP_CURVE" || venue === "BAGS_CURVE" ? "curve" : venue === "PUMPSWAP" ? "graduated" : null,
               liquidityUsd != null ? `liq $${Math.round(liquidityUsd / 1000)}k` : null,
               launchedAt ? ageLabel(launchedAt) : null,
               noExit ? "no exit" : null,
@@ -134,6 +140,15 @@ export function HoldingRow({
         ) : null}
         {confidence != null ? (
           <p className="mt-0.5 text-right text-[11px] text-muted">{Math.round(confidence * 100)}%</p>
+        ) : null}
+        {action ? (
+          <div
+            className="mt-1"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            {action}
+          </div>
         ) : null}
       </div>
     </div>

@@ -2,23 +2,62 @@
 
 import { useEffect, useState } from "react";
 import { useReducedMotion } from "motion/react";
-import { DESKS, type World } from "@/lib/world";
+import { type World } from "@/lib/world";
 import type { StreamItem } from "@/components/social/research-stream";
 
 type Line = { id: string; kicker: string; title: string; detail?: string };
 
-function catalogName(world?: World, chainId?: number) {
-  if (world == null && chainId == null) return "this desk";
-  const desk = DESKS.find((d) => d.world === (world ?? "STOCKS") && d.chainId === (chainId ?? (world === "MEMES" ? 101 : 4663)));
-  if (desk && world) return `${world === "MEMES" ? "Memes" : "Stocks"} · ${desk.title}`;
-  if (desk) return desk.title;
-  if (chainId === 101) return "Solana";
-  if (chainId === 4663) return "Robinhood Chain";
-  return "this desk";
+type DeskStat = { chainId?: number; label: string; listings: number; companies?: number; taking?: number };
+
+function asDesks(payload?: Record<string, unknown>): DeskStat[] {
+  const raw = payload?.desks;
+  if (!Array.isArray(raw)) return [];
+  const out: DeskStat[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as { label?: unknown; listings?: unknown; companies?: unknown; taking?: unknown; chainId?: unknown };
+    const label = String(r.label ?? "");
+    if (!label) continue;
+    out.push({
+      chainId: Number(r.chainId) || undefined,
+      label,
+      listings: Number(r.listings) || 0,
+      companies: Number(r.companies) || undefined,
+      taking: Number(r.taking) || undefined
+    });
+  }
+  return out;
 }
 
-function ambientFor(stage: string, world?: World, chainId?: number): string[] {
-  const catalog = catalogName(world, chainId);
+function shortDesk(label: string) {
+  return label.replace(/ Chain$/i, "");
+}
+
+function latestCensus(events: StreamItem[]) {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const desks = asDesks(events[i]?.payload);
+    if (desks.length && desks.some((d) => d.listings > 0 || (d.companies ?? 0) > 0)) {
+      const payload = events[i]!.payload ?? {};
+      return {
+        listings: Number(payload.listings) || desks.reduce((n, d) => n + d.listings, 0),
+        companies: Number(payload.companies) || 0,
+        reading: Number(payload.reading) || 0,
+        kept: Number(payload.kept) || 0,
+        desks
+      };
+    }
+  }
+  return null;
+}
+
+function catalogName(world?: World) {
+  if (world === "MEMES") return "the meme catalog";
+  if (world === "STOCKS") return "listed stock tokens";
+  return "the catalog";
+}
+
+function ambientFor(stage: string, world?: World): string[] {
+  const catalog = catalogName(world);
   const names = world === "MEMES" ? "coins" : "names";
   return (
     {
@@ -33,9 +72,9 @@ function ambientFor(stage: string, world?: World, chainId?: number): string[] {
         "Writing the mechanism, horizon, and what would prove it wrong."
       ],
       retrieve: [
-        `Walking the ${catalog} catalog ${names === "coins" ? "coin by coin" : "name by name"}.`,
-        `Setting aside ${names} that do not touch this story.`,
-        `Keeping a shortlist of ${names} that actually fit.`
+        `Walking Solana, Robinhood, Base, and Monad ${names === "coins" ? "coin by coin" : "name by name"}.`,
+        `Counting listings on each desk before keeping a shortlist.`,
+        `Setting aside ${names} that do not touch this story.`
       ],
       discover: [
         "Searching beyond the first catalog hit.",
@@ -78,11 +117,11 @@ function countIn(message: string) {
   return m ? Number(m[1]) : null;
 }
 
-function narrate(item: StreamItem, world?: World, chainId?: number): Omit<Line, "id"> {
+function narrate(item: StreamItem, world?: World): Omit<Line, "id"> {
   const n = countIn(item.message);
   const msg = item.message;
   const stage = item.stage.toLowerCase();
-  const catalog = catalogName(world, chainId);
+  const catalog = catalogName(world);
   const unit = world === "MEMES" ? "coins" : "names";
 
   if (stage === "queued") {
@@ -95,27 +134,64 @@ function narrate(item: StreamItem, world?: World, chainId?: number): Omit<Line, 
     return { kicker: "Thesis", title: "Reading your view", detail: "Finding the economic story underneath the sentence." };
   }
   if (stage === "retrieve") {
-    if (/reading \d+/i.test(msg)) {
+    const desks = asDesks(item.payload);
+    const desk = item.payload?.desk as DeskStat | undefined;
+    if (desk?.label) {
+      return {
+        kicker: shortDesk(desk.label),
+        title: `Searching ${shortDesk(desk.label)}`,
+        detail: `${desk.listings} listings · ${desk.companies ?? 0} companies on this desk · taking ${desk.taking ?? 0} into the screen`
+      };
+    }
+    if (/opened \d+ listings/i.test(msg)) {
+      const listings = Number(item.payload?.listings) || n;
+      const companies = Number(item.payload?.companies) || null;
       return {
         kicker: "Catalog",
-        title: `Reading ${n ?? "the"} ${catalog} ${unit}`,
+        title: listings != null ? `${listings} listings on the books` : msg,
+        detail: companies != null
+          ? `${companies} unique companies across ${desks.length || 4} desks.`
+          : "Counting every holdable stock token before the screen."
+      };
+    }
+    if (/reading \d+/i.test(msg)) {
+      const reading = Number(item.payload?.reading) || n;
+      const companies = Number(item.payload?.companies);
+      return {
+        kicker: "Catalog",
+        title: reading != null ? `Reading ${reading} companies` : `Reading ${catalog} ${unit}`,
         detail:
           world === "MEMES"
             ? "Screening launchpad coins for a real link to this view."
-            : "Screening listed stock tokens for a real link to this view."
+            : companies
+              ? `${reading} of ${companies} companies · pulled from every desk that lists them.`
+              : "Screening listed stock tokens for a real link to this view."
       };
     }
     if (/screened/i.test(msg)) {
-      return { kicker: "Catalog", title: msg.replace(" · ", ". "), detail: "Batches of the universe, scored for relevance." };
+      const batchDesks = Array.isArray(item.payload?.batchDesks)
+        ? (item.payload.batchDesks as unknown[]).map(String)
+        : [];
+      const kept = Number(item.payload?.kept);
+      return {
+        kicker: batchDesks[0] ? shortDesk(batchDesks[0]) : "Catalog",
+        title: msg.includes("kept") ? msg : msg.replace(" · ", ". "),
+        detail: batchDesks.length
+          ? `This batch is on ${batchDesks.map(shortDesk).join(", ")}${Number.isFinite(kept) ? ` · ${kept} kept so far` : ""}.`
+          : "Batches of the universe, scored for relevance."
+      };
     }
-    if (/look relevant/i.test(msg)) {
+    if (/look relevant|kept from the catalog/i.test(msg)) {
       return {
         kicker: "Shortlist",
-        title: n != null ? `${n} ${unit} look relevant` : msg,
-        detail: "These names survived the first screen."
+        title: n != null ? `${n} ${unit} kept` : msg,
+        detail: msg.includes("listed on") ? msg : "These names survived the first screen."
       };
     }
     return { kicker: "Catalog", title: msg, detail: `Still walking ${catalog}.` };
+  }
+  if (stage === "venue") {
+    return { kicker: "Desk", title: msg, detail: "Picking the listing chain for each company." };
   }
   if (stage === "discover") {
     if (/web search for extra/i.test(msg)) {
@@ -176,12 +252,10 @@ function narrate(item: StreamItem, world?: World, chainId?: number): Omit<Line, 
 
 export function ResearchLiveLog({
   events,
-  world,
-  chainId
+  world
 }: {
   events: StreamItem[];
   world?: World;
-  chainId?: number;
 }) {
   const reduce = useReducedMotion();
   const [pulse, setPulse] = useState(0);
@@ -195,18 +269,19 @@ export function ResearchLiveLog({
   }, [reduce, stage, last?.message]);
 
   const real = events.map((item, i) => {
-    const n = narrate(item, world, chainId);
+    const n = narrate(item, world);
     return { id: `${item.stage}-${i}-${item.message}`, ...n };
   });
-  const ambientPool = ambientFor(stage, world, chainId);
+  const ambientPool = ambientFor(stage, world);
   const ambient = ambientPool[pulse % ambientPool.length]!;
   const current = real[real.length - 1] ?? {
     id: "wait",
     kicker: "Desk",
-    title: `Starting research on ${catalogName(world, chainId)}`,
+    title: `Starting research on ${catalogName(world)}`,
     detail: "Waiting for the first note from the agent."
   };
   const history = real.slice(-7, -1).reverse();
+  const census = latestCensus(events);
 
   return (
     <div className="w-full max-w-[560px]">
@@ -215,6 +290,7 @@ export function ResearchLiveLog({
         {current.title}
       </h1>
       {current.detail ? <p className="mt-4 max-w-[34rem] text-[17px] leading-relaxed text-white/72">{current.detail}</p> : null}
+      {census ? <DeskTally census={census} /> : null}
       <p className="mt-5 text-[15px] leading-relaxed text-white/55" aria-live="polite">
         {ambient}
       </p>
@@ -232,6 +308,35 @@ export function ResearchLiveLog({
           ))}
         </ol>
       ) : null}
+    </div>
+  );
+}
+
+function DeskTally({
+  census
+}: {
+  census: { listings: number; companies: number; reading: number; kept: number; desks: DeskStat[] };
+}) {
+  return (
+    <div className="mt-6">
+      <p className="text-[12px] text-white/50">
+        {census.listings} listings
+        {census.companies ? ` · ${census.companies} companies` : ""}
+        {census.reading ? ` · reading ${census.reading}` : ""}
+        {census.kept ? ` · ${census.kept} kept` : ""}
+      </p>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {census.desks.map((desk) => (
+          <li
+            key={desk.label}
+            className="rounded-full bg-white/8 px-2.5 py-1 text-[12px] leading-none text-white/80 ring-1 ring-white/10"
+          >
+            <span className="font-semibold text-white">{shortDesk(desk.label)}</span>
+            <span className="ml-1.5 font-mono text-white/60">{desk.listings}</span>
+            {desk.taking != null ? <span className="ml-1 font-mono text-aqua/80">→{desk.taking}</span> : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -33,8 +33,22 @@ import { ResearchLiveLog } from "@/components/research/live-log";
 import { ApiError } from "@/lib/api";
 import { API_ORIGIN } from "@/lib/fmt";
 import { useWorld } from "@/lib/world";
+import { completeLiveInvest } from "@/lib/live-order";
 
-type Holding = { tokenId: string; symbol: string; weightBps: number; rationale?: string; role?: string };
+type Holding = { tokenId: string; symbol: string; weightBps: number; rationale?: string; role?: string; chainId?: number; logoUrl?: string | null };
+
+function mergeHoldings(prev: Holding[], next: Holding[]): Holding[] {
+  const byId = new Map(prev.map((h) => [h.tokenId, h]));
+  return next.map((h) => {
+    const prior = byId.get(h.tokenId);
+    return {
+      ...prior,
+      ...h,
+      chainId: h.chainId ?? prior?.chainId,
+      logoUrl: h.logoUrl ?? prior?.logoUrl ?? null
+    };
+  });
+}
 
 const STAGES = [
   {
@@ -117,7 +131,7 @@ export default function ComposeForm() {
   const reduce = useReducedMotion();
   const fork = useSearchParams().get("fork");
   const lensParam = useSearchParams().get("lens");
-  const { world, setWorld, chainId, setChainId } = useWorld();
+  const { world, setWorld } = useWorld();
   const [lens, setLens] = useState<"BELIEF" | "SKY">(lensParam === "sky" ? "SKY" : "BELIEF");
   const [astrologySystem, setAstrologySystem] = useState<"VEDIC" | "WESTERN">("VEDIC");
   const [chart, setChart] = useState("");
@@ -144,8 +158,8 @@ export default function ComposeForm() {
   }, [lensParam]);
 
   useEffect(() => {
-    fetchApi<{ liveEnabled?: boolean; wallet?: { id?: string } }>("/v1/wallet")
-      .then((d) => setLiveOk(Boolean(d.liveEnabled && d.wallet)))
+    fetchApi<{ liveEnabled?: boolean; wallet?: { id?: string }; signer?: string | null; wallets?: Array<{ id?: string }> }>("/v1/wallet")
+      .then((d) => setLiveOk(Boolean(d.liveEnabled && (d.signer === "MERA" || d.wallet || (d.wallets?.length ?? 0) > 0))))
       .catch(() => setLiveOk(false));
   }, [fetchApi]);
 
@@ -212,7 +226,6 @@ export default function ComposeForm() {
         body: JSON.stringify({
           sentence,
           world,
-          chainId,
           parentTakeId: fork || undefined,
           lens,
           astrologySystem: lens === "SKY" ? astrologySystem : undefined,
@@ -238,8 +251,8 @@ export default function ComposeForm() {
           if (!line) continue;
           try {
             const ev = JSON.parse(line.slice(6)) as StreamItem & { status?: string; payload?: { holdings?: Holding[]; thesis?: string; suggestWorld?: "STOCKS" | "MEMES" } };
-            setEvents((prev) => [...prev, { stage: ev.stage, message: ev.message }]);
-            if (ev.payload?.holdings) setHoldings(ev.payload.holdings);
+            setEvents((prev) => [...prev, { stage: ev.stage, message: ev.message, payload: ev.payload, at: ev.at }]);
+            if (ev.payload?.holdings) setHoldings((prev) => mergeHoldings(prev, ev.payload!.holdings!));
             if (ev.payload?.thesis) setThesis(String(ev.payload.thesis));
             if (ev.payload?.suggestWorld && ev.payload.suggestWorld !== world) setSuggestWorld(ev.payload.suggestWorld);
             if (ev.stage === "done" || ev.stage === "draft" || ev.stage === "refuse" || ev.stage === "failed") {
@@ -256,7 +269,7 @@ export default function ComposeForm() {
         run?: { error?: string; status?: string };
       }>(`/v1/research/${started.runId}`);
       if (done.portfolio && "holdings" in done.portfolio && done.portfolio.holdings) {
-        setHoldings(done.portfolio.holdings);
+        setHoldings((prev) => mergeHoldings(prev, done.portfolio.holdings!));
       }
       if (done.spec?.interpretation) setThesis(done.spec.interpretation);
       if (done.run?.status === "FAILED") setError(done.run.error || "Couldn’t research that view.");
@@ -294,10 +307,13 @@ export default function ComposeForm() {
             }
           );
           if (backed.pocket?.id && !backed.invest?.fills) {
-            await fetchApi(
-              wantReal && liveOk ? `/v1/pockets/${backed.pocket.id}/live-invest` : `/v1/pockets/${backed.pocket.id}/dry-run-invest`,
-              { method: "POST", body: JSON.stringify({ amountUsd: usd }) }
-            );
+            if (wantReal && liveOk) await completeLiveInvest(fetchApi, backed.pocket.id, usd);
+            else {
+              await fetchApi(`/v1/pockets/${backed.pocket.id}/dry-run-invest`, {
+                method: "POST",
+                body: JSON.stringify({ amountUsd: usd })
+              });
+            }
           }
         } catch {
           /* view is live; paper fill can lag */
@@ -339,7 +355,7 @@ export default function ComposeForm() {
             </button>
           </div>
           <div className="flex min-h-0 flex-1 items-start justify-end pt-8 md:pt-14">
-            <ResearchLiveLog events={events} world={world} chainId={chainId} />
+            <ResearchLiveLog events={events} world={world} />
           </div>
           <div className="glass-night flex items-center gap-4 rounded-2xl px-5 py-4 md:gap-6">
             <p className="min-w-0 flex-1 truncate text-[15px] font-medium text-white/90">
@@ -414,13 +430,15 @@ export default function ComposeForm() {
               {holdings.map((h) => (
                 <HoldingRow
                   key={h.tokenId}
+                  tokenId={h.tokenId}
                   symbol={h.symbol}
                   weightBps={h.weightBps}
                   rationale={h.rationale}
                   role={h.role}
                   takeId={takeId}
                   whyInBasket={h.rationale}
-                  chainId={chainId}
+                  chainId={h.chainId}
+                  logoUrl={h.logoUrl}
                 />
               ))}
             </div>
@@ -568,7 +586,7 @@ export default function ComposeForm() {
                 <span className="font-mono text-ink">{formatMoney(invested.usd)}</span> of paper money is now tracking
               </p>
               <p className="mt-4 text-[16px] font-medium leading-snug text-ink">
-                “{(sentence.trim() || chart.trim() || "this sky")}”
+                “{(sentence.trim() || chart.trim() || "this chart")}”
               </p>
               <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[12px] font-medium text-ink">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal" />
@@ -602,7 +620,7 @@ export default function ComposeForm() {
       />
       <main id="main" className="mx-auto w-full max-w-[760px] px-5 pb-20 pt-8 md:pt-16">
         <h1 className="display text-[28px] text-ink md:text-[40px]">
-          {lens === "SKY" ? "What’s in the sky?" : "What’s your view on the world?"}
+          {lens === "SKY" ? "Write an astrology chart" : "What’s your view on the world?"}
         </h1>
         <p className="mt-3 text-[15px] text-muted">
           {fork
@@ -616,11 +634,9 @@ export default function ComposeForm() {
         <ComposeChooser
           lens={lens}
           world={world}
-          chainId={chainId}
           system={astrologySystem}
           onLens={setLens}
           onWorld={setWorld}
-          onChain={setChainId}
           onSystem={setAstrologySystem}
         />
         {suggestWorld ? (

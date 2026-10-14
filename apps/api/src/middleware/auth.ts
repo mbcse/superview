@@ -5,6 +5,7 @@ import { prisma } from "@takeandstake/db";
 import { handleFromPrivyId } from "../auth-handle.js";
 import { assertWalletAssignable, isHexAddress, verifiedWalletId } from "../wallet-bind.js";
 import { verifySharedSecret, verifySvixSignature } from "../webhook-auth.js";
+import { readMeraSession } from "../services/mera-session.js";
 
 const env = loadEnv();
 
@@ -13,10 +14,11 @@ declare global {
     interface Request {
       user?: {
         id: string;
-        privyId: string;
+        privyId: string | null;
         handle: string;
         displayName: string;
         jurisdictionStatus: string;
+        authProvider?: string;
       };
     }
   }
@@ -114,8 +116,13 @@ export async function resolveUser(req: Request) {
   const q = req.query?.token;
   const fromQuery = Array.isArray(q) ? q[0] : q;
   const token = auth?.startsWith("Bearer ") ? auth.slice(7) : typeof fromQuery === "string" ? fromQuery : "";
+  if (token?.startsWith("mera.")) {
+    const userId = readMeraSession(token);
+    if (userId) return prisma.user.findUnique({ where: { id: userId }, include: { wallets: true } });
+    if (!demoAllowed()) return null;
+  }
   const sdk = client();
-  if (token && sdk) {
+  if (token && sdk && !token.startsWith("mera.")) {
     try {
       const verified = await sdk.verifyAuthToken(token);
       return upsertPrivyUser(verified.userId);

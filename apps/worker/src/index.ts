@@ -22,7 +22,7 @@ import {
   prevCloseByTokens
 } from "@takeandstake/core";
 import { describeLlm, enrichStale, isRetryableError, replyToComment, runDailyMonitor, runResearchPipeline, writeManusMemo } from "@takeandstake/ai";
-import { quoteSolanaAssets, syncBagsCatalog, syncJupiterMemeCatalog, syncXStocksCatalog, refreshMemeRisk, setLimiterRedis, partitionHotSets, pushAlert, CORE_XSTOCKS } from "@takeandstake/markets";
+import { quoteSolanaAssets, quoteEvmAssets, syncBagsCatalog, syncJupiterMemeCatalog, syncXStocksCatalog, syncCoinbaseBaseCatalog, refreshMemeRisk, setLimiterRedis, partitionHotSets, pushAlert, CORE_XSTOCKS, writePriceSnapshot } from "@takeandstake/markets";
 import { handleExecutionJob, reportProviderHealth } from "./execution.js";
 
 const env = loadEnv();
@@ -107,8 +107,16 @@ hushLocks(
         return { risk };
       }
       const r = await syncRobinhoodCatalog();
-      const xstocks = await syncXStocksCatalog().catch((e) => {
+      const xstocks = await syncXStocksCatalog("Solana").catch((e) => {
         logError("worker", "xstocks catalog", e);
+        return { count: 0 };
+      });
+      const monad = await syncXStocksCatalog("Monad").catch((e) => {
+        logError("worker", "monad xstocks catalog", e);
+        return { count: 0 };
+      });
+      const base = await syncCoinbaseBaseCatalog().catch((e) => {
+        logError("worker", "base catalog", e);
         return { count: 0 };
       });
       const bags = await syncBagsCatalog().catch((e) => {
@@ -125,8 +133,8 @@ hushLocks(
       });
       const enrich = await enrichStale(12);
       await reportProviderHealth();
-      log("worker", "catalog", { ...r, xstocks, bags, memes, actions, enrich });
-      return { ...r, xstocks, bags, memes, actions, enrich };
+      log("worker", "catalog", { ...r, xstocks, monad, base, bags, memes, actions, enrich });
+      return { ...r, xstocks, monad, base, bags, memes, actions, enrich };
     },
     { connection, lockDuration: 180_000 }
   )
@@ -170,50 +178,30 @@ function startOfNyDay(now = Date.now()) {
   return new Date(hi);
 }
 
-function tokenIdsFromTakes(rows: Array<{ revisions?: Array<{ target?: { holdings?: Array<{ tokenId: string }> | null } | null }> }>) {
-  return rows.flatMap((t) => t.revisions?.[0]?.target?.holdings?.map((h) => h.tokenId) ?? []);
+async function publishedHoldingIds(take = 200) {
+  const takes = await prisma.take.findMany({
+    where: { status: "PUBLISHED", currentRevisionId: { not: null } },
+    orderBy: { createdAt: "desc" },
+    take,
+    select: { currentRevisionId: true }
+  });
+  const ids = takes.map((t) => t.currentRevisionId).filter((id): id is string => Boolean(id));
+  if (!ids.length) return [];
+  const revs = await prisma.takeRevision.findMany({
+    where: { id: { in: ids } },
+    select: { target: { select: { holdings: { select: { tokenId: true } } } } }
+  });
+  return revs.flatMap((r) => r.target?.holdings.map((h) => h.tokenId) ?? []);
 }
 
 async function loadHotSets() {
   if (cachedHot && Date.now() - hotAt < 15_000) return cachedHot;
-  const [pockets, trending, published, coreX, xstocks, sse] = await Promise.all([
+  const [pocketTakes, published, coreX, xstocks, sse] = await Promise.all([
     prisma.pocket.findMany({
       where: { status: "ACTIVE" },
-      select: {
-        take: {
-          select: {
-            revisions: {
-              take: 1,
-              orderBy: { number: "desc" as const },
-              select: { target: { select: { holdings: { select: { tokenId: true } } } } }
-            }
-          }
-        }
-      }
+      select: { take: { select: { currentRevisionId: true } } }
     }),
-    prisma.take.findMany({
-      where: { status: "PUBLISHED" },
-      take: 60,
-      orderBy: { createdAt: "desc" },
-      select: {
-        revisions: {
-          take: 1,
-          orderBy: { number: "desc" as const },
-          select: { target: { select: { holdings: { select: { tokenId: true } } } } }
-        }
-      }
-    }),
-    prisma.take.findMany({
-      where: { status: "PUBLISHED" },
-      take: 200,
-      select: {
-        revisions: {
-          take: 1,
-          orderBy: { number: "desc" as const },
-          select: { target: { select: { holdings: { select: { tokenId: true } } } } }
-        }
-      }
-    }),
+    publishedHoldingIds(200),
     prisma.stockToken.findMany({
       where: {
         source: "XSTOCKS",
@@ -225,10 +213,18 @@ async function loadHotSets() {
     prisma.stockToken.findMany({ where: { source: "XSTOCKS", status: "ACTIVE" }, select: { id: true }, take: 40 }),
     pub.smembers("hot:sse").catch(() => [] as string[])
   ]);
+  const pocketRevIds = pocketTakes.map((p) => p.take.currentRevisionId).filter((id): id is string => Boolean(id));
+  const pocketRevs = pocketRevIds.length
+    ? await prisma.takeRevision.findMany({
+        where: { id: { in: pocketRevIds } },
+        select: { target: { select: { holdings: { select: { tokenId: true } } } } }
+      })
+    : [];
+  const pocketIds = pocketRevs.flatMap((r) => r.target?.holdings.map((h) => h.tokenId) ?? []);
   cachedHot = partitionHotSets({
-    pocketAssetIds: [...tokenIdsFromTakes(pockets.map((p) => p.take)), ...sse],
-    trendingAssetIds: tokenIdsFromTakes(trending),
-    publishedAssetIds: tokenIdsFromTakes(published),
+    pocketAssetIds: [...pocketIds, ...sse],
+    trendingAssetIds: published,
+    publishedAssetIds: published,
     xstockIds: [...new Set([...coreX, ...xstocks].map((t) => t.id))]
   });
   hotAt = Date.now();
@@ -304,6 +300,9 @@ hushLocks(
           const sol = await prisma.stockToken.findMany({
             where: { id: { in: [...want] }, chainId: 101, status: "ACTIVE" }
           });
+          const evmExtra = await prisma.stockToken.findMany({
+            where: { id: { in: [...want] }, chainId: { in: [8453, 143] }, status: "ACTIVE" }
+          });
           for (const t of sol) worldById.set(t.id, t.world === "MEMES" ? "MEMES" : "STOCKS");
           const solQ = sol.length
             ? await quoteSolanaAssets(
@@ -325,7 +324,7 @@ hushLocks(
           let oldest = now;
           const solRows: Array<{
             tokenId: string;
-            source: "JUPITER" | "XSTOCKS" | "DEXSCREENER" | "BAGS" | "PUMPFUN";
+            source: "JUPITER" | "XSTOCKS" | "DEXSCREENER" | "BAGS" | "PUMPFUN" | "CHAINLINK";
             price: number;
             volumeUsd: number | null;
             halt: boolean;
@@ -360,11 +359,92 @@ hushLocks(
               updatedAt: new Date(q.observedAt)
             });
           }
-          if (solRows.length && (lastSolPersistAt === 0 || now - lastSolPersistAt > 15_000)) {
-            await prisma.priceSnapshot.createMany({ data: solRows }).catch(() => {});
+          const evmQ = evmExtra.length
+            ? await quoteEvmAssets(
+                evmExtra.map((t) => ({
+                  id: t.id,
+                  symbol: t.symbol,
+                  chainId: t.chainId,
+                  contractAddress: t.contractAddress,
+                  decimals: t.decimals,
+                  source: t.source,
+                  venue: t.venue,
+                  xstocksSymbol: t.xstocksSymbol
+                }))
+              ).catch((e) => {
+                logError("worker", "evm quotes", e);
+                return new Map();
+              })
+            : new Map();
+          const evmRows: typeof solRows = [];
+          for (const [id, q] of evmQ) {
+            const tok = evmExtra.find((t) => t.id === id);
+            if (tok) {
+              setPriceAliases(lastMids, tok.symbol, q.last, tok.source);
+              setPriceAliases(lastTokens, tok.symbol, q.last, tok.source);
+            }
+            quotes.push({
+              tokenId: id,
+              symbol: tok?.symbol ?? id,
+              last: q.last,
+              tokenLast: q.last,
+              bid: q.last,
+              ask: q.last,
+              halt: q.halt,
+              chgPct: q.chg,
+              volumeUsd: q.liquidityUsd,
+              asOf: new Date(q.observedAt).toISOString(),
+              stale: now - q.observedAt > 10 * 60_000
+            });
+            evmRows.push({
+              tokenId: id,
+              source: q.provider === "XSTOCKS" || q.provider === "CHAINLINK" ? q.provider : "DEXSCREENER",
+              price: q.last,
+              volumeUsd: q.liquidityUsd,
+              halt: q.halt,
+              updatedAt: new Date(q.observedAt)
+            });
+          }
+          if ((solRows.length || evmRows.length) && (lastSolPersistAt === 0 || now - lastSolPersistAt > 15_000)) {
+            for (const row of [...solRows, ...evmRows]) {
+              await writePriceSnapshot({
+                tokenId: row.tokenId,
+                source: row.source,
+                price: row.price,
+                volumeUsd: row.volumeUsd,
+                updatedAt: row.updatedAt
+              });
+            }
             lastSolPersistAt = now;
           }
           if (hot.t1.length && now - oldest > 15_000) pushAlert("t1_stale", String(now - oldest));
+        }
+        const held = [...new Set([...hot.t1, ...hot.t2, ...hot.t3])];
+        const quotedIds = new Set(quotes.map((q) => q.tokenId).filter((id): id is string => Boolean(id)));
+        const missing = held.filter((id) => !quotedIds.has(id));
+        if (missing.length) {
+          const toks = await prisma.stockToken.findMany({
+            where: { id: { in: missing }, status: "ACTIVE" },
+            select: { id: true, symbol: true, source: true, world: true }
+          });
+          for (const tok of toks) {
+            worldById.set(tok.id, tok.world === "MEMES" ? "MEMES" : "STOCKS");
+            const px = lookupPx(lastMids, tok.symbol, tok.source);
+            if (px == null) continue;
+            const prior = lookupPx(prevClose, tok.symbol, tok.source);
+            quotes.push({
+              tokenId: tok.id,
+              symbol: tok.symbol,
+              last: px,
+              tokenLast: px,
+              bid: px,
+              ask: px,
+              halt: false,
+              chgPct: prior && prior > 0 ? (px - prior) / prior : null,
+              asOf: new Date(rh.at).toISOString(),
+              stale: false
+            });
+          }
         }
         const cache = JSON.stringify({ at: rh.at, quotes });
         await pub.set(QUOTES_CACHE_KEY, cache);
@@ -407,8 +487,7 @@ const researchWorker = new Worker(
     const runId = String(job.data.runId);
     log("worker", "research queued", { run: runId, attempt: job.attemptsMade + 1 });
     const emit = async (stage: string, message: string, payload?: unknown) => {
-      const noisy = stage === "retrieve" && /^Screened /i.test(message);
-      if (!noisy) log("worker", `${stage}  ${message}`, { run: runId });
+      log("worker", `${stage}  ${message}`, { run: runId });
       await prisma.researchEvent.create({ data: { runId, stage, message, payload: payload as object | undefined } });
       await publish(`research:${runId}`, { stage, message, payload, at: new Date().toISOString() });
     };

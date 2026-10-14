@@ -186,12 +186,76 @@ async function resolveToken(symbol: string, name: string, allowCreate: boolean) 
       universe: {
         create: {
           legalName: name,
-          businessSummary: `${name} is a listed company with a Robinhood Chain stock token.`,
+          businessSummary: `${name} is a listed company with a tokenized stock.`,
           sector: "Technology"
         }
-      }
+      },
+      underlyingTicker: symbol
     }
   });
+}
+
+async function seedVenueSiblings() {
+  for (const row of TOKEN_SEED.slice(0, 6)) {
+    const ticker = row.symbol;
+    await prisma.stockToken.upsert({
+      where: { chainId_contractAddress: { chainId: 101, contractAddress: `So${ticker}x1111111111111111111111111111111`.slice(0, 44) } },
+      update: { underlyingTicker: ticker, source: "XSTOCKS", world: "STOCKS", status: "ACTIVE" },
+      create: {
+        symbol: `${ticker}x`,
+        name: row.name,
+        contractAddress: `So${ticker}x1111111111111111111111111111111`.slice(0, 44),
+        chainId: 101,
+        world: "STOCKS",
+        source: "XSTOCKS",
+        venue: "AMM",
+        decimals: 6,
+        xstocksSymbol: `${ticker}x`,
+        underlyingTicker: ticker,
+        status: "ACTIVE"
+      }
+    });
+    await prisma.stockToken.upsert({
+      where: { chainId_contractAddress: { chainId: 8453, contractAddress: seedAddress(`BASE${ticker}`) } },
+      update: {
+        underlyingTicker: ticker,
+        source: "COINBASE",
+        world: "STOCKS",
+        status: "ACTIVE",
+        symbol: `${ticker}c`,
+        decimals: 8
+      },
+      create: {
+        symbol: `${ticker}c`,
+        name: row.name,
+        contractAddress: seedAddress(`BASE${ticker}`),
+        chainId: 8453,
+        world: "STOCKS",
+        source: "COINBASE",
+        venue: "ZEROX_EVM",
+        decimals: 8,
+        underlyingTicker: ticker,
+        status: "ACTIVE"
+      }
+    });
+    await prisma.stockToken.upsert({
+      where: { chainId_contractAddress: { chainId: 143, contractAddress: seedAddress(`MONAD${ticker}`) } },
+      update: { underlyingTicker: ticker, source: "XSTOCKS", world: "STOCKS", status: "ACTIVE" },
+      create: {
+        symbol: `${ticker}x`,
+        name: row.name,
+        contractAddress: seedAddress(`MONAD${ticker}`),
+        chainId: 143,
+        world: "STOCKS",
+        source: "XSTOCKS",
+        venue: "KURU_FLOW",
+        decimals: 6,
+        xstocksSymbol: `${ticker}x`,
+        underlyingTicker: ticker,
+        status: "ACTIVE"
+      }
+    });
+  }
 }
 
 async function seedView(
@@ -344,6 +408,8 @@ async function main() {
       { key: "pause_agent", enabled: false },
       { key: "live_trading_xstocks", enabled: false },
       { key: "live_trading_memes", enabled: false },
+      { key: "live_trading_base", enabled: false },
+      { key: "live_trading_monad", enabled: false },
       { key: "live_rh_bags", enabled: false }
     ],
     skipDuplicates: true
@@ -358,6 +424,7 @@ async function main() {
 
   const tokenCount = await prisma.stockToken.count();
   const allowCreate = tokenCount === 0;
+  await seedVenueSiblings();
   const tokens = new Map<string, { id: string; symbol: string }>();
   for (const t of TOKEN_SEED) {
     const row = await resolveToken(t.symbol, t.name, allowCreate);

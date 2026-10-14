@@ -73,7 +73,7 @@ export function constructPortfolio(
   scored.sort((a, b) => b.score - a.score);
   const picked = scored.slice(0, maxHold);
   if (picked.length < minHold) {
-    if (meme && picked.length >= 1) return themeEqualWeight(picked, cash, maxHold, issuerCap);
+    if (picked.length >= 1) return themeEqualWeight(picked, cash, maxHold, issuerCap);
     const coverage: Record<string, boolean> = {};
     for (const c of candidates) coverage[c.actionId] = false;
     return { ok: false, code: "INSUFFICIENT_ELIGIBLE_EXPOSURE", coverage };

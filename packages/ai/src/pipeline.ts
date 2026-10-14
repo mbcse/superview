@@ -3,11 +3,16 @@ import { constructPortfolio, type HoldingRole } from "@takeandstake/core";
 import { criticModel, researchModel } from "./llm.js";
 import { genObject } from "./generate.js";
 import {
+  companyTicker,
   displaySymbol,
   log,
-  deskOf,
+  chainLabel,
+  deskOfOrNull,
+  MONAD_CHAIN_ID,
+  parseAllowedChains,
   parseChainId,
   parseWorld,
+  underlyingTicker,
   sanitizeCatalogText,
   MEME_MIN_LIQUIDITY_USD,
   MEME_MIN_AGE_MS,
@@ -23,6 +28,9 @@ import { factsFromCompany, saveResearchNotes, thesisKey, thesisNoteFromCompany }
 import { clearCheckpoint, mergePicks, parseCheckpoint, patchCheckpoint } from "./checkpoint.js";
 import { runWebDiligence, runWebDiscover } from "./web-research.js";
 import { refusedSpec, shouldRefuseView } from "./view-guard.js";
+import { nansenMonadNote } from "@takeandstake/markets";
+import { listingFromToken, routeBasket } from "./venue.js";
+import { catalogCensus, collapseTokensByCompany, companyKey, pickScreenUniverse, tickerOf } from "./company-universe.js";
 import {
   ANALYST_PROMPT,
   CRITIC_PROMPT,
@@ -131,12 +139,14 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
   if (!view.trim()) throw new Error("missing_view");
 
   const world: World = parseWorld(run.world ?? run.take?.world);
-  const chainId = parseChainId(run.chainId ?? run.take?.chainId, world);
-  const desk = deskOf(world, chainId).title;
+  const versionsMeta = (run.modelVersions as { allowedChains?: number[] } | null) ?? {};
+  const allowedChains = parseAllowedChains(run.allowedChains ?? versionsMeta.allowedChains ?? run.chainId ?? run.take?.chainId, world);
+  const chainId = run.chainId ?? run.take?.chainId ?? (allowedChains.length === 1 ? allowedChains[0] : null);
+  const desk = chainId != null ? (deskOfOrNull(world, chainId)?.title ?? `${world}`) : `${world} · agent venues`;
   const launchBet = /launch|just launched|new coin|bonding/i.test(view);
   const listed = await prisma.stockToken.findMany({
-    where: { status: "ACTIVE", world, chainId },
-    include: { universe: true }
+    where: { status: "ACTIVE", world, chainId: { in: allowedChains } },
+    include: { universe: true, prices: { orderBy: { observedAt: "desc" }, take: 1 } }
   });
   const flagged = listed.filter((t) => {
     if (world !== "MEMES") return true;
@@ -156,7 +166,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
     return true;
   });
   const tokens = (() => {
-    if (world !== "MEMES") return flagged;
+    if (world !== "MEMES") return collapseTokensByCompany(flagged);
     const ranked = [...flagged].sort((a, b) => Number(b.liquidityUsd ?? 0) - Number(a.liquidityUsd ?? 0));
     const liquid = ranked.filter((t) => Number(t.liquidityUsd ?? 0) >= MEME_MIN_LIQUIDITY_USD);
     return liquid.length >= 16 ? liquid : ranked.slice(0, 40);
@@ -165,6 +175,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
     id: t.universe?.id ?? t.id,
     tokenId: t.id,
     symbol: t.symbol,
+    ticker: companyKey(t),
     legalName: sanitizeCatalogText(t.universe?.legalName ?? t.name, 80),
     businessSummary: `CATALOG_DATA: "${sanitizeCatalogText(t.universe?.businessSummary ?? t.name, 280)}"`,
     sector: t.universe?.sector ?? (world === "MEMES" ? "meme" : null),
@@ -174,7 +185,18 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
     profile: t.universe?.profile,
     refreshedAt: t.universe?.refreshedAt ?? t.updatedAt
   }));
-  log("ai", "research start", { run: runId, view, world, chainId, universe: universe.length });
+  const chainCounts = Object.fromEntries(
+    allowedChains.map((id) => [id, flagged.filter((t) => t.chainId === id).length])
+  );
+  log("ai", "research start", {
+    run: runId,
+    view,
+    world,
+    chainId,
+    tokens: flagged.length,
+    companies: universe.length,
+    chains: chainCounts
+  });
   const cp0 = parseCheckpoint(run.modelVersions);
   if (cp0.spec || (cp0.screenedSymbols?.length ?? 0) > 0) {
     log("ai", "research resume", {
@@ -230,6 +252,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
       });
     }
   }
+  if (!spec) throw new Error("missing_spec");
 
   await prisma.thesisSpec.upsert({
     where: { runId },
@@ -280,41 +303,118 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
 
   await setStage(runId, "SCREENING", "retrieve");
   const qEmb = await embedText(`${spec.normalizedView} ${spec.interpretation} ${spec.mechanism}`);
-  const skip = new Set((cp0.screenedSymbols ?? []).map((s) => s.toUpperCase()));
+  const skip = new Set(
+    (cp0.screenedSymbols ?? []).flatMap((s) => {
+      const symbol = s.toUpperCase();
+      const ticker = companyTicker(s).toUpperCase();
+      return ticker && ticker !== symbol ? [symbol, ticker] : [symbol];
+    })
+  );
   let relevant = mergePicks([], cp0.picks);
   if (skip.size < universe.length) {
-    const remaining = Math.min(80, Math.max(0, universe.length - skip.size));
-    await emit("retrieve", world === "MEMES"
-      ? `Reading ${remaining} remaining launchpad coins on ${desk}`
-      : `Reading ${remaining} remaining names on ${desk}`);
+    const listingsByTicker = new Map<string, Array<{ chainId: number }>>();
+    for (const t of listed) {
+      const key = companyKey(t);
+      const arr = listingsByTicker.get(key) ?? [];
+      arr.push({ chainId: t.chainId });
+      listingsByTicker.set(key, arr);
+    }
+    const picked =
+      world === "MEMES"
+        ? { rows: universe, addedByChain: {} as Record<number, number> }
+        : pickScreenUniverse(universe, listingsByTicker, allowedChains, (rows) => orderByThesis(rows, qEmb), 55, 220);
+    const screenSet = picked.rows;
+    const screenCap = world === "MEMES" ? 80 : screenSet.length;
+    const census = catalogCensus(listed, allowedChains, chainLabel, picked.addedByChain);
+    await emit(
+      "retrieve",
+      world === "MEMES"
+        ? `Opened ${census.listings} launchpad coins on ${desk}`
+        : `Opened ${census.listings} listings · ${census.companies} companies on ${census.desks.map((d) => d.label.replace(/ Chain$/, "")).join(", ")}`,
+      { listings: census.listings, companies: census.companies, reading: screenSet.length, desks: census.desks }
+    );
+    if (world !== "MEMES") {
+      for (const deskStat of census.desks) {
+        await emit(
+          "retrieve",
+          `Searching ${deskStat.label} · ${deskStat.listings} listings · ${deskStat.companies} companies · taking ${deskStat.taking ?? 0} into the screen`,
+          { listings: census.listings, companies: census.companies, reading: screenSet.length, desks: census.desks, desk: deskStat }
+        );
+      }
+    }
+    await emit(
+      "retrieve",
+      world === "MEMES"
+        ? `Reading ${Math.min(screenCap, universe.length)} remaining launchpad coins on ${desk}`
+        : `Reading ${screenSet.length} of ${census.companies} companies · ${census.desks.length} desks`,
+      { listings: census.listings, companies: census.companies, reading: screenSet.length, desks: census.desks }
+    );
     const more = await screenCatalog({
-      universe,
+      universe: screenSet,
       interpretation: spec.interpretation,
       mechanism: spec.mechanism,
       angles: spec.angles,
       queryEmbedding: qEmb,
       skipSymbols: skip,
+      cap: screenCap,
       desk,
       prompt: world === "MEMES" ? MEME_SCREENER_PROMPT : undefined,
       onBatch: async (info) => {
         await patchCheckpoint(runId, { picks: info.batchPicks, screenedSymbols: info.batchSymbols });
-        await emit("retrieve", `Screened ${info.done}/${info.total} remaining batches · ${info.found + relevant.length} relevant`);
+        const batchDesks = [
+          ...new Set(
+            info.batchSymbols.flatMap((symbol) => {
+              const row = screenSet.find((u) => u.symbol.toUpperCase() === symbol.toUpperCase());
+              return (listingsByTicker.get(tickerOf(row ?? { symbol })) ?? []).map((l) => chainLabel(l.chainId));
+            })
+          )
+        ];
+        await emit(
+          "retrieve",
+          `Screened ${info.done}/${info.total} batches · ${info.found + relevant.length} kept · this batch ${batchDesks.join(", ") || desk}`,
+          {
+            listings: census.listings,
+            companies: census.companies,
+            reading: screenSet.length,
+            kept: info.found + relevant.length,
+            desks: census.desks,
+            batchDesks
+          }
+        );
       }
     });
     relevant = mergePicks(relevant, more);
   } else {
-    await emit("retrieve", world === "MEMES"
-      ? `Reusing screen of ${relevant.length} coins`
-      : `Reusing screen of ${relevant.length} companies`);
+    const reused = catalogCensus(listed, allowedChains, chainLabel);
+    await emit(
+      "retrieve",
+      world === "MEMES"
+        ? `Reusing screen of ${relevant.length} coins`
+        : `Reusing screen of ${relevant.length} companies from ${reused.listings} listings · ${reused.companies} companies`,
+      { listings: reused.listings, companies: reused.companies, kept: relevant.length, desks: reused.desks }
+    );
   }
-  await emit("retrieve", world === "MEMES"
-    ? `${relevant.length} coins look relevant`
-    : `${relevant.length} companies look relevant`, { picks: relevant.slice(0, 24) });
+  const keptDesks = [
+    ...new Set(
+      relevant.flatMap((p) => {
+        const row = universe.find((u) => u.symbol.toUpperCase() === p.symbol.toUpperCase());
+        const listedFor = listed.filter((t) => companyKey(t) === tickerOf(row ?? { symbol: p.symbol }));
+        return listedFor.map((t) => chainLabel(t.chainId));
+      })
+    )
+  ];
+  await emit(
+    "retrieve",
+    world === "MEMES"
+      ? `${relevant.length} coins look relevant`
+      : `${relevant.length} companies kept from the catalog${keptDesks.length ? ` · listed on ${keptDesks.join(", ")}` : ""}`,
+    { picks: relevant.slice(0, 24), kept: relevant.length, desks: keptDesks }
+  );
 
   await setStage(runId, "DISCOVERING", "discover");
   const discoveredNotes: string[] = [...(cp0.discoveredNotes ?? [])];
   const bySymbol = new Map(universe.map((u) => [u.symbol.toUpperCase(), u]));
-  const catalogEnough = relevant.length >= 6;
+  const catalogEnough = world === "MEMES" && relevant.length >= 6;
   if (cp0.discoverDone || catalogEnough) {
     if (!cp0.discoverDone) {
       await patchCheckpoint(runId, { discoverDone: true, discoveredNotes });
@@ -332,7 +432,14 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
             ? `• ${row.name} → ${hit.symbol} (${angle?.name ?? "discover"})`
             : `• ${row.name} considered, not on this desk`
         );
-        if (hit && !relevant.some((p) => p.symbol.toUpperCase() === hit.symbol.toUpperCase())) {
+        if (
+          hit &&
+          !relevant.some((p) => {
+            const pickTicker = (p as { ticker?: string }).ticker || companyTicker(p.symbol);
+            const hitTicker = hit.ticker || companyTicker(hit.symbol);
+            return p.symbol.toUpperCase() === hit.symbol.toUpperCase() || pickTicker.toUpperCase() === hitTicker.toUpperCase();
+          })
+        ) {
           relevant.push({
             symbol: hit.symbol,
             relevant: true,
@@ -364,7 +471,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
     const need = Math.max(MEME_MIN_HOLDINGS, Math.min(6, universe.length));
     for (const u of orderByThesis(universe, qEmb)) {
       if (relevant.length >= need) break;
-      if (have.has(u.symbol.toUpperCase()) || u.halt) continue;
+      if (have.has(u.symbol.toUpperCase()) || (u as { halt?: boolean }).halt) continue;
       have.add(u.symbol.toUpperCase());
       relevant.push({
         symbol: u.symbol,
@@ -379,7 +486,14 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
     }
   }
 
-  const uniqueSymbols = [...new Map(relevant.map((p) => [p.symbol.toUpperCase(), p])).values()]
+  const uniqueSymbols = [
+    ...new Map(
+      relevant.map((p) => {
+        const ticker = ((p as { ticker?: string }).ticker || companyTicker(p.symbol) || p.symbol).toUpperCase();
+        return [ticker, p] as const;
+      })
+    ).values()
+  ]
     .sort((a, b) => {
       const ua = bySymbol.get(a.symbol.toUpperCase());
       const ub = bySymbol.get(b.symbol.toUpperCase());
@@ -605,6 +719,57 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
     return { refused: false, spec, constructed };
   }
 
+  const listingsByTicker = new Map<string, typeof listed>();
+  for (const t of listed) {
+    const key = (t.underlyingTicker || underlyingTicker(t.symbol, t.source) || t.symbol).toUpperCase();
+    const arr = listingsByTicker.get(key) ?? [];
+    arr.push(t);
+    listingsByTicker.set(key, arr);
+  }
+  const routed = routeBasket(
+    constructed.holdings.map((h) => {
+      const token = listed.find((t) => t.id === h.tokenId);
+      const ticker = (token?.underlyingTicker || underlyingTicker(token?.symbol ?? h.symbol, token?.source) || h.symbol).toUpperCase();
+      return {
+        ticker,
+        weightBps: h.weightBps,
+        listings: (listingsByTicker.get(ticker) ?? []).map(listingFromToken)
+      };
+    }),
+    { world, allowedChains }
+  );
+  const routeByTicker = new Map(routed.map((r) => [r.underlyingTicker.toUpperCase(), r]));
+  constructed = {
+    ...constructed,
+    holdings: constructed.holdings.map((h) => {
+      const token = listed.find((t) => t.id === h.tokenId);
+      const ticker = (token?.underlyingTicker || underlyingTicker(token?.symbol ?? h.symbol, token?.source) || h.symbol).toUpperCase();
+      const pick = routeByTicker.get(ticker);
+      const routedToken = listed.find((t) => t.id === (pick?.tokenId ?? h.tokenId));
+      return {
+        ...h,
+        tokenId: pick?.tokenId ?? h.tokenId,
+        symbol: pick?.symbol ?? h.symbol,
+        chainId: pick?.chainId ?? routedToken?.chainId ?? token?.chainId,
+        logoUrl: routedToken?.logoUrl ?? token?.logoUrl ?? null
+      };
+    })
+  };
+  const venueChains = [...new Set(routed.map((r) => r.chainId))];
+  if (run.takeId) {
+    await prisma.take.update({
+      where: { id: run.takeId },
+      data: { chainId: venueChains.length === 1 ? venueChains[0] : null }
+    });
+  }
+  for (const pick of routed) {
+    await emit("venue", pick.reason, { tokenId: pick.tokenId, chainId: pick.chainId, symbol: pick.symbol });
+    if (pick.chainId !== MONAD_CHAIN_ID) continue;
+    const token = listed.find((t) => t.id === pick.tokenId);
+    const line = token?.contractAddress ? await nansenMonadNote(token.contractAddress) : null;
+    if (line) await emit("venue", line, { tokenId: pick.tokenId, chainId: pick.chainId, symbol: pick.symbol });
+  }
+
   await prisma.candidateCompany.deleteMany({ where: { runId } });
   const actions = await prisma.economicAction.findMany({ where: { runId } });
   const actionId = actions[0]?.id;
@@ -618,6 +783,7 @@ export async function runResearchPipeline(runId: string, emit: ResearchEmitter =
         resolvedTokenId: h.tokenId,
         holdable: true,
         provider: "openai+search",
+        venueOptions: routed.find((r) => r.tokenId === h.tokenId)?.options ?? undefined,
         score: {
           create: {
             directness: scoredH?.item.directness ?? 0.5,

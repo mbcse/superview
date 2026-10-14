@@ -23,6 +23,10 @@ export function refusedSpec(view: string, reason = "not a readable view") {
     clarifyingQuestions: [],
     angles: [],
     refuse: true,
-    refuseReason: reason
+    refuseReason: reason,
+    skyRead: "",
+    marketPrediction: "",
+    timeLord: "",
+    transitFocus: ""
   };
 }

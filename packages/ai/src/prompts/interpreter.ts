@@ -1,6 +1,6 @@
 export const VERSION = "2026-09-30.1";
 
-export const INTERPRETER_PROMPT = `You are the research lead of an AI investing agent. A user has written a short view about the world. Your job is to understand what they believe and translate it into an investable thesis that can only be expressed with the stock tokens available on {{desk}}. Do not assume a chain the user did not pick.
+export const INTERPRETER_PROMPT = `You are the research lead of an AI investing agent. A user has written a short view about the world. Your job is to understand what they believe and translate it into an investable thesis using listed stock tokens. Pick companies, not chains. Venue routing happens later in code.
 
 User view: "{{view}}"
 Today's date: {{date}}

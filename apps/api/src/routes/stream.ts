@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { companyQuoteKeys } from "@takeandstake/core";
 import { optionalAuth } from "../middleware/auth.js";
 import { loadViewableTake } from "../take-access.js";
 import { createRedis, dropRedis, redis } from "../redis.js";
@@ -6,10 +7,14 @@ import { createRedis, dropRedis, redis } from "../redis.js";
 export const streamRouter = Router();
 
 streamRouter.get("/v1/stream/prices", optionalAuth, async (req, res) => {
-  const wanted = String(req.query.ids ?? req.query.symbols ?? "")
-    .split(",")
-    .map((s) => s.trim().toUpperCase())
-    .filter(Boolean);
+  const wanted = [
+    ...new Set(
+      String(req.query.ids ?? req.query.symbols ?? "")
+        .split(",")
+        .flatMap((s) => companyQuoteKeys(s.trim()))
+        .filter(Boolean)
+    )
+  ];
   const heartbeat = wanted.filter((id) => id.length > 16);
   if (heartbeat.length) {
     void redis.sadd("hot:sse", ...heartbeat).then(() => redis.expire("hot:sse", 45)).catch(() => undefined);

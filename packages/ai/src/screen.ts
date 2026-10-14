@@ -1,3 +1,4 @@
+import { companyTicker } from "@takeandstake/shared";
 import { genObject } from "./generate.js";
 import { researchModel } from "./llm.js";
 import { fill, SCREENER_PROMPT } from "./prompts/index.js";
@@ -7,6 +8,7 @@ import { cosine } from "./embed.js";
 
 export type ScreenRow = {
   symbol: string;
+  ticker?: string;
   legalName: string;
   businessSummary: string;
   sector: string | null;
@@ -25,7 +27,7 @@ export function catalogCard(u: ScreenRow) {
   };
 }
 
-export function orderByThesis(universe: ScreenRow[], queryEmbedding: number[]) {
+export function orderByThesis<T extends ScreenRow>(universe: T[], queryEmbedding: number[]): T[] {
   if (!queryEmbedding.length) return universe;
   return [...universe].sort(
     (a, b) => cosine(queryEmbedding, b.embedding) - cosine(queryEmbedding, a.embedding)
@@ -39,6 +41,7 @@ export async function screenCatalog(input: {
   angles: unknown;
   queryEmbedding: number[];
   skipSymbols?: Set<string>;
+  cap?: number;
   desk?: string;
   prompt?: string;
   onBatch?: (info: {
@@ -50,9 +53,13 @@ export async function screenCatalog(input: {
   }) => Promise<void>;
 }): Promise<ScreenerOut["picks"]> {
   const skip = new Set([...(input.skipSymbols ?? [])].map((s) => s.toUpperCase()));
-  const SCREEN_CAP = 80;
+  const SCREEN_CAP = input.cap ?? 80;
   const ordered = orderByThesis(
-    input.universe.filter((u) => !skip.has(u.symbol.toUpperCase())),
+    input.universe.filter((u) => {
+      const symbol = u.symbol.toUpperCase();
+      const ticker = (u.ticker || companyTicker(u.symbol)).toUpperCase();
+      return !skip.has(symbol) && !skip.has(ticker);
+    }),
     input.queryEmbedding
   ).slice(0, SCREEN_CAP);
   if (!ordered.length) return [];

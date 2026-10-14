@@ -10,6 +10,7 @@ import { SegmentedTabs } from "@/components/data/segmented-tabs";
 import { fmtPx, fmtPct, tick, API_ORIGIN } from "@/lib/fmt";
 import { Button } from "@/components/ui/button";
 import { TickValue } from "@/components/data/tick-value";
+import { ChainChip, chainName, resolveChainId } from "@/components/data/chain-mark";
 import { TokenMark, stockTick } from "@/components/data/token-mark";
 
 export type StockMeta = {
@@ -65,9 +66,12 @@ function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: St
   const [period, setPeriod] = useState<(typeof PERIODS)[number]>("1M");
   const [spark, setSpark] = useState<number[]>([]);
   const [card, setCard] = useState<TokenCard | null>(null);
-  const chainId =
-    meta.chainId ?? card?.listings?.find((l) => l.symbol.toUpperCase() === String(symbol).toUpperCase())?.chainId;
-  const name = symbol ? stockTick(symbol, chainId) : "";
+  const chainId = resolveChainId(
+    symbol,
+    meta.chainId ?? card?.listings?.find((l) => l.symbol.toUpperCase() === String(symbol).toUpperCase())?.chainId,
+    card?.logoUrl
+  );
+  const name = symbol ? stockTick(symbol, chainId, card?.logoUrl) : "";
 
   useEffect(() => {
     if (!symbol) return;
@@ -163,9 +167,10 @@ function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: St
               <X size={16} />
             </button>
             <p className="text-[13px] font-medium text-muted">Live mark</p>
-            <h2 id="stock-title" className="display mt-2 flex items-center gap-3 text-[28px] text-ink">
+            <h2 id="stock-title" className="display mt-2 flex flex-wrap items-center gap-3 text-[28px] text-ink">
               <TokenMark symbol={symbol} logoUrl={card?.logoUrl} chainId={chainId} size={40} />
               {name}
+              <ChainChip chainId={chainId} className="text-[12px]" />
               {meta.role ? <RoleChip role={meta.role} /> : null}
             </h2>
             {card?.name && card.name.toUpperCase() !== name ? (
@@ -175,9 +180,15 @@ function StockSheet({ symbol, meta, onClose }: { symbol: string | null; meta: St
               <p className="mt-1 text-[13px] text-muted">{[card.sector, card.industry].filter(Boolean).join(" · ")}</p>
             ) : null}
             {card?.listings && card.listings.length > 1 ? (
-              <p className="mt-2 text-[12px] text-muted">
-                {card.listings.map((l) => `${l.symbol} · ${l.chainId === 101 ? "Solana" : "Robinhood"}`).join(" · ")}
-              </p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {card.listings.map((l) => (
+                  <span key={`${l.chainId}-${l.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-mist px-2 py-1 text-[12px] font-medium text-ink">
+                    <TokenMark symbol={l.symbol} logoUrl={card.logoUrl} chainId={l.chainId} size={20} />
+                    {stockTick(l.symbol, l.chainId, card.logoUrl)}
+                    <span className="text-muted">{chainName(l.chainId)}</span>
+                  </span>
+                ))}
+              </div>
             ) : null}
             {meta.weightBps != null ? (
               <p className="mt-1 font-mono text-[13px] text-muted">{(meta.weightBps / 100).toFixed(1)}% of the basket</p>

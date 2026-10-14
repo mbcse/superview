@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "tsx src/index.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/auth-handle.test.ts src/wallet-bind.test.ts src/webhook-auth.test.ts src/take-access.test.ts"
+    "test": "tsx --test src/auth-handle.test.ts src/wallet-bind.test.ts src/webhook-auth.test.ts src/take-access.test.ts src/services/mera-session.test.ts"
   },
   "dependencies": {
     "@privy-io/server-auth": "^1.32.5",

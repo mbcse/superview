@@ -10,6 +10,7 @@ import { useLiveQuote } from "@/components/social/price-stream";
 import { RoleChip } from "@/components/social/role-chip";
 import { decisionLabel } from "@/lib/agent-copy";
 import { API_ORIGIN, fmtVs, changeTone } from "@/lib/fmt";
+import { benchmarkLabel, benchmarkSummary } from "@/lib/benchmark";
 import { SkyThesis } from "@/components/social/sky-thesis";
 
 const VsChart = dynamic(() => import("@/components/charts/vs-chart").then((m) => m.VsChart), { ssr: false });
@@ -48,7 +49,8 @@ export function PublicTake({
   vs,
   agentLine,
   holdings,
-  chainId
+  chainId,
+  world
 }: {
   takeId: string;
   handle: string;
@@ -59,6 +61,7 @@ export function PublicTake({
   vs: number | null;
   agentLine: string;
   chainId?: number;
+  world?: string;
   holdings: Array<{
     id?: string;
     token?: { symbol?: string; logoUrl?: string | null; chainId?: number };
@@ -73,7 +76,7 @@ export function PublicTake({
   const [range, setRange] = useState<(typeof RANGES)[number]>("1D");
   const [points, setPoints] = useState<Array<{ asOf: string; indexValue: number | null; benchmarkIndex: number | null }>>([]);
   const tone = changeTone(vs);
-  const summary = vs == null ? "No mark vs S&P 500 yet." : `${fmtVs(vs)} vs S&P 500.`;
+  const summary = benchmarkSummary(vs, world, fmtVs);
 
   useEffect(() => {
     let stop = false;
@@ -114,11 +117,11 @@ export function PublicTake({
           {vs == null ? "—" : fmtVs(vs)}
         </span>
       </p>
-      <p className="mt-2 font-mono text-[13px] text-muted">vs S&P 500 · Illustrative</p>
+      <p className="mt-2 font-mono text-[13px] text-muted">{benchmarkLabel(world)} · Illustrative</p>
       <Surface className="p-5">
         <SegmentedTabs options={RANGES} value={range} onChange={(v) => setRange(v as (typeof RANGES)[number])} layoutId="public-range" />
         <div className="mt-4">
-          <VsChart points={points} liveVs={vs} range={range} summary={summary} />
+          <VsChart points={points} liveVs={vs} range={range} summary={summary} title={benchmarkLabel(world)} />
         </div>
       </Surface>
       <Surface className="p-5">

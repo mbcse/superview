@@ -6,6 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { House, TrendUp, Plus, ChartPie, User, Bell, MagnifyingGlass, Pulse } from "@phosphor-icons/react";
 import { useAuth } from "./auth-provider";
+import { useWalletCash } from "./wallet-cash";
+import { fmtUsd } from "@/lib/fmt";
 import { Input } from "./ui/input";
 import { Wordmark } from "./brand";
 import { AgentOrb } from "./glass/agent-orb";
@@ -93,6 +95,24 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 }
 
+function CashChip() {
+  const { wallet } = useWalletCash();
+  const cash = wallet?.homeCashUsd;
+  const pending = (wallet?.pending?.length ?? 0) > 0;
+  const empty = cash == null || cash <= 0;
+  return (
+    <Link
+      href="/app/wallet"
+      aria-label={empty ? "Add cash" : `Cash ${fmtUsd(cash)}`}
+      className={`mr-1 flex h-9 items-center rounded-full px-3 font-mono text-[13px] font-medium transition-colors duration-150 hover:bg-mist hover:text-ink ${
+        pending ? "animate-pulse text-muted" : empty ? "text-teal" : "text-ink"
+      }`}
+    >
+      {empty ? "Add cash" : fmtUsd(cash)}
+    </Link>
+  );
+}
+
 function ShellHeader() {
   const { displayName } = useAuth();
   const [q, setQ] = useQueryState("q", { defaultValue: "" });
@@ -128,6 +148,7 @@ function ShellHeader() {
           </div>
         </form>
         <div className="ml-auto flex items-center gap-1 sm:ml-0">
+          <CashChip />
           <Link
             href="/app/trending"
             aria-label="Search"

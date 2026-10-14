@@ -79,4 +79,13 @@ describe("day change", () => {
     expect(filterQuotes(quotes, ["AAPLX"])).toHaveLength(1);
     expect(filterQuotes(quotes, ["tok_aapl"])).toHaveLength(1);
   });
+
+  it("lets a Coinbase listing read the RH company print without overwriting it", () => {
+    const book = new Map<string, number>();
+    setPriceAliases(book, "SMR", 7.46, "ROBINHOOD");
+    expect(lookupPx(book, "SMRc", "COINBASE")).toBe(7.46);
+    expect(lookupPx(book, "SMR", "ROBINHOOD")).toBe(7.46);
+    expect(quoteHasSymbol([{ symbol: "SMR" }], "SMRc")).toBe(true);
+    expect(filterQuotes([{ symbol: "SMR", tokenId: "rh-smr" }], ["SMRc"])).toHaveLength(1);
+  });
 });

@@ -1,4 +1,12 @@
-import { ROBINHOOD_CHAIN_ID, SOLANA_CHAIN_ID, sanitizeCatalogText } from "@takeandstake/shared";
+import { ROBINHOOD_CHAIN_ID, SOLANA_CHAIN_ID, isSolanaChain, parseChainId, sanitizeCatalogText } from "@takeandstake/shared";
+
+function classifyBagsChain(chain: string): number {
+  const n = Number(chain);
+  if (Number.isFinite(n) && n > 0) return parseChainId(n);
+  if (/solana|sol/i.test(chain) || !chain) return SOLANA_CHAIN_ID;
+  if (/evm|robinhood|4663/i.test(chain)) return ROBINHOOD_CHAIN_ID;
+  return isSolanaChain(parseChainId(chain, "MEMES")) ? SOLANA_CHAIN_ID : ROBINHOOD_CHAIN_ID;
+}
 import { bagsHeaders, providerFetch } from "./http.js";
 import type { SwapQuote, SwapReq } from "./types.js";
 
@@ -45,7 +53,7 @@ export async function bagsLaunchFeed(): Promise<BagsLaunch[]> {
         symbol: String(r.symbol ?? "BAGS").toUpperCase().slice(0, 16),
         image: r.image,
         status: r.status,
-        chainId: /evm|robinhood|4663/i.test(String(r.chain ?? "")) ? ROBINHOOD_CHAIN_ID : SOLANA_CHAIN_ID,
+        chainId: classifyBagsChain(String(r.chain ?? "")),
         createdAt: r.createdAt
       }
     ];

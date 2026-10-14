@@ -67,7 +67,7 @@ export function formatBrief(input: {
   }
 
   lines.push("");
-  lines.push("Basket (Robinhood Chain stock tokens):");
+  lines.push("Basket (tokenized stocks; Solana when the agent invests):");
   if (!holdings.length) {
     lines.push("- (no holdings in draft yet)");
   } else {

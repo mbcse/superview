@@ -397,7 +397,7 @@ export default function TakeClient({ data }: { data: any }) {
       <Surface className="p-5">
         <SegmentedTabs options={RANGES} value={range} onChange={(v) => setRange(v as (typeof RANGES)[number])} layoutId="take-range" />
         <div className="mt-4">
-          <VsChart points={points} liveVs={vs} range={range} summary={summary} />
+          <VsChart points={points} liveVs={vs} range={range} summary={summary} title={`vs ${bench}`} />
         </div>
       </Surface>
       <Surface className="p-5">

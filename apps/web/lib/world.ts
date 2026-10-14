@@ -80,11 +80,17 @@ export function useWorld() {
 }
 
 export const DESKS: Array<{ id: string; world: World; chainId: number; title: string }> = [
-  { id: "stocks-rh", world: "STOCKS", chainId: 4663, title: "Robinhood Chain" },
-  { id: "stocks-sol", world: "STOCKS", chainId: 101, title: "Solana" },
-  { id: "memes-sol", world: "MEMES", chainId: 101, title: "Solana" },
-  { id: "memes-rh", world: "MEMES", chainId: 4663, title: "Robinhood Chain" }
+  { id: "stocks", world: "STOCKS", chainId: 101, title: "Stocks" },
+  { id: "memes", world: "MEMES", chainId: 101, title: "Memes" }
 ];
+
+export function chainChip(chainId?: number | null) {
+  if (chainId === 101) return "Solana";
+  if (chainId === 8453) return "Base";
+  if (chainId === 143) return "Monad";
+  if (chainId === 4663) return "Robinhood";
+  return null;
+}
 
 export function worldQuery(world: World, extra = "") {
   return `world=${world}${extra}`;

@@ -9,7 +9,7 @@ export const INPUT_SCHEMA = {
       type: "string",
       name: "Market belief",
       data: {
-        description: "One-sentence market belief to turn into a researched stock-token basket brief.",
+        description: "One-sentence market belief to turn into a researched tokenized-stock basket brief. The agent buys on Solana.",
         placeholder: "AI infrastructure demand will outgrow cloud spend"
       }
     },

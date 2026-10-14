@@ -219,27 +219,53 @@ socialRouter.post("/v1/takes/:id/fork", requireAuth, async (req, res) => {
   if (!access.ok) return res.status(access.status).json({ error: access.error });
   const original = await prisma.take.findUnique({
     where: { id: access.take.id },
-    include: { revisions: { orderBy: { number: "desc" }, take: 1 } }
+    include: {
+      revisions: {
+        orderBy: { number: "desc" },
+        take: 1,
+        include: { target: { include: { holdings: true } } }
+      }
+    }
   });
   if (!original) return res.status(404).json({ error: "not_found" });
+  const srcHoldings = original.revisions[0]?.target?.holdings ?? [];
+  const tokens = srcHoldings.length
+    ? await prisma.stockToken.findMany({ where: { id: { in: srcHoldings.map((h) => h.tokenId) } } })
+    : [];
+  const venueChains = [...new Set(tokens.map((t) => t.chainId))];
   const fork = await prisma.take.create({
     data: {
       authorId: req.user!.id,
       status: "DRAFT",
       world: original.world,
-      chainId: original.chainId,
+      chainId: venueChains.length === 1 ? venueChains[0] : original.chainId,
       lens: original.lens,
       astrologySystem: original.astrologySystem,
       parentTakeId: original.id
     }
   });
+  const copiedTarget = srcHoldings.length
+    ? await prisma.portfolioTarget.create({
+        data: {
+          cashBps: original.revisions[0]?.target?.cashBps ?? 500,
+          holdings: {
+            create: srcHoldings.map((h) => ({
+              tokenId: h.tokenId,
+              weightBps: h.weightBps,
+              rationale: h.rationale
+            }))
+          }
+        }
+      })
+    : null;
   await prisma.takeRevision.create({
     data: {
       takeId: fork.id,
       number: 1,
       sentence: original.revisions[0]?.sentence ?? "Copied view",
       astrologyChart: original.revisions[0]?.astrologyChart,
-      origin: "AUTHOR"
+      origin: "AUTHOR",
+      targetId: copiedTarget?.id
     }
   });
   await prisma.takeLink.create({

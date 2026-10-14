@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Queue } from "bullmq";
 import { prisma } from "@takeandstake/db";
-import { takeSentenceSchema, log, parseChainId, parseWorld, deskOf } from "@takeandstake/shared";
+import { takeSentenceSchema, log, parseAllowedChains, parseWorld } from "@takeandstake/shared";
 import { loadEnv } from "@takeandstake/config";
 import { requireAuth, requireTakeAuthor } from "../middleware/auth.js";
 import { createRedis, dropRedis, redis } from "../redis.js";
@@ -25,9 +25,8 @@ researchRouter.post("/v1/research", requireAuth, async (req, res) => {
   const parsed = takeSentenceSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const world = parseWorld(parsed.data.world);
-  const chainId = parseChainId(parsed.data.chainId, world);
-  const desk = deskOf(world, chainId);
-  if (!desk) return res.status(400).json({ error: "bad_desk" });
+  const allowedChains = parseAllowedChains((parsed.data as { allowedChains?: number[] }).allowedChains ?? parsed.data.chainId, world);
+  const chainId = allowedChains.length === 1 ? allowedChains[0] : null;
   const lens = parsed.data.lens === "SKY" ? "SKY" : "BELIEF";
   const chart = (parsed.data.chart ?? "").trim() || undefined;
   const astrologySystem = lens === "SKY" ? parsed.data.astrologySystem === "VEDIC" ? "VEDIC" : "WESTERN" : undefined;
@@ -37,7 +36,7 @@ researchRouter.post("/v1/research", requireAuth, async (req, res) => {
   const parentTakeId = parsed.data.parentTakeId;
   if (parentTakeId) {
     const parent = await prisma.take.findUnique({ where: { id: parentTakeId } });
-    if (parent && (parent.world !== world || parent.chainId !== chainId)) {
+    if (parent && parent.world !== world) {
       return res.status(400).json({ error: "desk_mismatch" });
     }
   }
@@ -73,7 +72,7 @@ researchRouter.post("/v1/research", requireAuth, async (req, res) => {
           where: {
             normalizedTake: { equals: sentence, mode: "insensitive" },
             refuse: false,
-            run: { world, chainId }
+            run: { world }
           },
           include: { run: { include: { events: { orderBy: { createdAt: "desc" }, take: 8 } } } }
         });
@@ -84,6 +83,7 @@ researchRouter.post("/v1/research", requireAuth, async (req, res) => {
       takeId: take.id,
       world,
       chainId,
+      allowedChains,
       status: reusable ? "DRAFT" : "PENDING",
       stage: reusable ? "draft" : "queued",
       modelVersions: reusable?.modelVersions ?? {

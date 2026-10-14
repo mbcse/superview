@@ -15,6 +15,10 @@ meRouter.get("/v1/me", requireAuth, async (req, res) => {
 
 meRouter.post("/v1/me/sync", requireAuth, async (req, res) => {
   try {
+    if (!req.user!.privyId) {
+      const user = await prisma.user.findUnique({ where: { id: req.user!.id }, include: { wallets: true } });
+      return res.json({ user });
+    }
     const user = await upsertPrivyUser(req.user!.privyId, {
       displayName: typeof req.body?.displayName === "string" ? req.body.displayName : req.user!.displayName,
       walletAddress: typeof req.body?.walletAddress === "string" ? req.body.walletAddress : undefined

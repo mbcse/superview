@@ -12,6 +12,8 @@ export type SeriesPoint = {
   indexValue: number;
   benchmarkIndex: number;
   vsSpy: number;
+  vsBenchmark: number;
+  benchmark?: string;
   holdingContributions: unknown;
 };
 
@@ -42,6 +44,7 @@ export function dropUnitMixMarks(rows: MarkRow[]): SeriesPoint[] {
       indexValue,
       benchmarkIndex,
       vsSpy: indexValue - benchmarkIndex,
+      vsBenchmark: indexValue - benchmarkIndex,
       holdingContributions: r.holdingContributions
     });
   }

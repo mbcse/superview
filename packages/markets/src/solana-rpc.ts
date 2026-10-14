@@ -1,3 +1,4 @@
+import { USDC_SOLANA_MINT } from "@takeandstake/shared";
 import { LIMITS, waitToken } from "./limiter.js";
 import { breakerFail, breakerOk, breakerSuccess } from "./breaker.js";
 
@@ -51,6 +52,18 @@ export async function getMultipleAccounts(pks: string[]): Promise<Array<{ pubkey
     });
   }
   return out;
+}
+
+export async function solanaUsdcBalance(owner: string): Promise<number | null> {
+  const mint = USDC_SOLANA_MINT;
+  const row = await solanaRpc<{
+    value?: Array<{ account?: { data?: { parsed?: { info?: { tokenAmount?: { uiAmount?: number } } } } } }>;
+  }>("getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }]);
+  const amounts = (row?.value ?? [])
+    .map((a) => Number(a.account?.data?.parsed?.info?.tokenAmount?.uiAmount ?? 0))
+    .filter((n) => Number.isFinite(n));
+  if (!amounts.length) return 0;
+  return amounts.reduce((s, n) => s + n, 0);
 }
 
 export async function getBalanceLamports(address: string): Promise<number | null> {

@@ -43,6 +43,7 @@ export async function startResearch(sentence: string, horizon?: string): Promise
   const body: Record<string, unknown> = {
     sentence: sentence.trim().slice(0, 280),
     world: "STOCKS",
+    allowedChains: [101],
     lens: "BELIEF"
   };
   if (horizon?.trim()) body.horizon = horizon.trim();

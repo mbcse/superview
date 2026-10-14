@@ -32,6 +32,11 @@ function subscript(n: number) {
   return String(n).replace(/[0-9]/g, (d) => "₀₁₂₃₄₅₆₇₈₉"[Number(d)] ?? d);
 }
 
+export function fmtQty(n: number | null | undefined) {
+  if (n == null || Number.isNaN(n)) return "—";
+  return n.toLocaleString(undefined, { maximumFractionDigits: Math.abs(n) >= 100 ? 2 : 4 });
+}
+
 export function fmtUsd(n: number | null | undefined) {
   if (n == null || Number.isNaN(n)) return "—";
   const sign = n < 0 ? "−" : "";
@@ -70,6 +75,14 @@ export function skipReason(code?: string) {
       return "Quote didn’t match the market price";
     case "dust":
       return "Below minimum trade size";
+    case "no_privy_route":
+      return "No Privy route to that desk cash";
+    case "no_aurora_route":
+      return "No Aurora route to Monad AUSD";
+    case "desk_closed":
+      return "Desk closed / no live market";
+    case "gas_paused":
+      return "Gas sponsorship is paused";
     case "pool_share":
       return "Too large for this pool";
     case "top_up_sol":

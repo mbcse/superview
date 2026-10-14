@@ -24,7 +24,7 @@ loadRootEnv();
 const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? process.env.PRIVY_APP_ID ?? "";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@takeandstake/shared", "remotion", "@remotion/player"],
+  transpilePackages: ["@takeandstake/shared", "@category-labs/mera", "remotion", "@remotion/player"],
   webpack: (config) => {
     config.resolve.extensionAlias = {
       ...config.resolve.extensionAlias,
@@ -38,7 +38,8 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_PRIVY_APP_ID: privyAppId,
     NEXT_PUBLIC_POSTHOG_KEY:
       process.env.NEXT_PUBLIC_POSTHOG_KEY ?? "phc_5918n4s3UPJOIawjTciuy5YrGdotlvB1dTpoZFPTdkM",
-    NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com"
+    NEXT_PUBLIC_POSTHOG_HOST: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com",
+    NEXT_PUBLIC_MERA_RP_ID: process.env.NEXT_PUBLIC_MERA_RP_ID ?? process.env.MERA_RP_ID ?? "superview.fun"
   },
   async redirects() {
     return [

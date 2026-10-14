@@ -1,6 +1,6 @@
 import { Prisma, prisma } from "@takeandstake/db";
 import { RH_PRICES_URL } from "@takeandstake/chain";
-import { MEME_STALE_MS } from "@takeandstake/shared";
+import { MEME_STALE_MS, companyTicker, isMintOrContract, symbolsMatch, underlyingTicker } from "@takeandstake/shared";
 import { asNum } from "../portfolio/mark.js";
 
 type RhQuote = {
@@ -27,7 +27,7 @@ export type LiveQuote = {
   chgPct: number | null;
   volumeUsd: number | null;
   halt: boolean;
-  source: "RH_REST" | "CHAINLINK" | "JUPITER" | "XSTOCKS" | "DEXSCREENER" | "BAGS" | "PUMPFUN" | null;
+  source: "RH_REST" | "CHAINLINK" | "JUPITER" | "XSTOCKS" | "DEXSCREENER" | "BAGS" | "PUMPFUN" | "AERODROME" | "KURU" | "ISSUER" | null;
   asOf: string | null;
   stale: boolean;
   feed: boolean;
@@ -57,16 +57,33 @@ export function midOf(bid: number | null, ask: number | null): number | null {
   return ask ?? bid;
 }
 
+function issuerBare(symbol: string) {
+  if (/[xc]$/.test(symbol)) return symbol.slice(0, -1).toUpperCase();
+  const u = symbol.toUpperCase();
+  return u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
+}
+
+/** Own-listing keys only. xStocks / Coinbase prints must not overwrite the RH book. */
 export function quoteKeys(symbol: string, source?: string) {
   const u = symbol.toUpperCase();
   if (source && source !== "ROBINHOOD") return [u];
   const bare = u.startsWith("RH") && u.length > 2 ? u.slice(2) : u;
-  return [u, bare, `RH${bare}`].filter(Boolean);
+  return [...new Set([u, bare, `RH${bare}`])].filter(Boolean);
+}
+
+/** Company ticker + RH aliases so SMRc / NVDAx can read the cash-session print. */
+export function companyQuoteKeys(symbol: string, source?: string) {
+  const company = (source ? underlyingTicker(symbol, source) : issuerBare(symbol)).toUpperCase();
+  return [...new Set([...quoteKeys(symbol, source), company, `RH${company}`])].filter(Boolean);
 }
 
 export function lookupPx(book: Map<string, number> | undefined, symbol: string, source?: string) {
   if (!book?.size) return undefined;
   for (const k of quoteKeys(symbol, source)) {
+    const v = book.get(k);
+    if (v != null && Number.isFinite(v)) return v;
+  }
+  for (const k of companyQuoteKeys(symbol, source)) {
     const v = book.get(k);
     if (v != null && Number.isFinite(v)) return v;
   }
@@ -113,11 +130,11 @@ export function inheritAliasChg<T extends { symbol: string; chgPct?: number | nu
   const byKey = new Map<string, number>();
   for (const q of quotes) {
     if (q.chgPct == null || !Number.isFinite(q.chgPct) || q.chgPct === 0) continue;
-    for (const k of quoteKeys(q.symbol)) byKey.set(k, q.chgPct);
+    for (const k of companyQuoteKeys(q.symbol)) byKey.set(k, q.chgPct);
   }
   for (const q of quotes) {
     if (q.chgPct != null && q.chgPct !== 0) continue;
-    const inherited = quoteKeys(q.symbol).map((k) => byKey.get(k)).find((v) => v != null && v !== 0);
+    const inherited = companyQuoteKeys(q.symbol).map((k) => byKey.get(k)).find((v) => v != null && v !== 0);
     if (inherited != null) q.chgPct = inherited;
   }
   return quotes;
@@ -175,7 +192,7 @@ export function lastCashSessionStart(now = Date.now()) {
 
 export function quoteHasSymbol<T extends { symbol: string }>(quotes: T[], symbol: string) {
   const have = new Set(quotes.map((q) => q.symbol.toUpperCase()));
-  return quoteKeys(symbol).some((k) => have.has(k));
+  return companyQuoteKeys(symbol).some((k) => have.has(k));
 }
 
 export function filterQuotes<T extends { symbol: string; tokenId?: string }>(quotes: T[], symbols?: string[]) {
@@ -183,7 +200,7 @@ export function filterQuotes<T extends { symbol: string; tokenId?: string }>(quo
   const want = new Set<string>();
   for (const s of symbols) {
     want.add(s.toUpperCase());
-    for (const k of quoteKeys(s)) want.add(k);
+    for (const k of companyQuoteKeys(s)) want.add(k);
   }
   return quotes.filter((q) => want.has(q.symbol.toUpperCase()) || want.has(String(q.tokenId ?? "").toUpperCase()));
 }
@@ -193,7 +210,7 @@ export async function fetchRobinhoodQuotes(prior?: Map<string, number>) {
   if (!res.ok) throw new Error(`RH prices ${res.status}`);
   const body = (await res.json()) as { quotes?: RhQuote[] };
   const quotes = body.quotes ?? [];
-  const tokens = await prisma.stockToken.findMany({ where: { chainId: 4663 } });
+  const tokens = await prisma.stockToken.findMany({ where: { chainId: 4663, source: "ROBINHOOD" } });
   const bySymbol = new Map(tokens.map((t) => [t.symbol.toUpperCase(), t]));
   const now = new Date();
   const payload: RhLiveQuote[] = [];
@@ -203,7 +220,12 @@ export async function fetchRobinhoodQuotes(prior?: Map<string, number>) {
     const u = symbol.toUpperCase();
     const found = [bySymbol.get(u), bySymbol.get(`RH${u}`), u.startsWith("RH") ? bySymbol.get(u.slice(2)) : undefined];
     const uniq = new Map<string, (typeof tokens)[number]>();
-    for (const t of found) if (t) uniq.set(t.id, t);
+    for (const t of found) {
+      if (!t) continue;
+      if (!isMintOrContract(t.contractAddress, 4663)) continue;
+      if (!symbolsMatch(t.symbol, symbol, "ROBINHOOD")) continue;
+      uniq.set(t.id, t);
+    }
     return [...uniq.values()];
   }
 
@@ -300,17 +322,27 @@ async function aliasTokenIds(tokenId: string) {
   return [tokenId, ...others.map((t) => t.id)];
 }
 
+async function siblingTokenIds(tokenId: string): Promise<string[]> {
+  const token = await prisma.stockToken.findUnique({
+    where: { id: tokenId },
+    select: { underlyingTicker: true, symbol: true, source: true }
+  });
+  const ticker = (token?.underlyingTicker || companyTicker(token?.symbol ?? "", token?.source)).toUpperCase();
+  if (!ticker) return [];
+  const rows = await prisma.stockToken.findMany({
+    where: {
+      status: "ACTIVE",
+      id: { not: tokenId },
+      OR: [{ underlyingTicker: ticker }, { symbol: { in: [ticker, `RH${ticker}`], mode: "insensitive" } }]
+    },
+    select: { id: true, source: true }
+  });
+  return rows.sort((a, b) => Number(b.source === "ROBINHOOD") - Number(a.source === "ROBINHOOD")).map((r) => r.id);
+}
+
 export async function latestPrice(tokenId: string) {
-  const ids = await aliasTokenIds(tokenId);
-  const rh = await prisma.priceSnapshot.findFirst({
-    where: { tokenId: { in: ids }, source: "RH_REST" },
-    orderBy: { observedAt: "desc" }
-  });
-  if (rh) return rh;
-  return prisma.priceSnapshot.findFirst({
-    where: { tokenId: { in: ids }, source: { in: ["CHAINLINK", ...SOLANA_PRICE_SOURCES] } },
-    orderBy: { observedAt: "desc" }
-  });
+  const rows = await latestPrices(tokenId, 1);
+  return rows[0] ?? null;
 }
 
 export async function latestPrices(tokenId: string, take = 2) {
@@ -321,8 +353,22 @@ export async function latestPrices(tokenId: string, take = 2) {
     take
   });
   if (rh.length) return rh;
-  return prisma.priceSnapshot.findMany({
+  const own = await prisma.priceSnapshot.findMany({
     where: { tokenId: { in: ids }, source: { in: ["CHAINLINK", ...SOLANA_PRICE_SOURCES] } },
+    orderBy: { observedAt: "desc" },
+    take
+  });
+  if (own.length) return own;
+  const siblings = await siblingTokenIds(tokenId);
+  if (!siblings.length) return [];
+  const sibRh = await prisma.priceSnapshot.findMany({
+    where: { tokenId: { in: siblings }, source: "RH_REST" },
+    orderBy: { observedAt: "desc" },
+    take
+  });
+  if (sibRh.length) return sibRh;
+  return prisma.priceSnapshot.findMany({
+    where: { tokenId: { in: siblings }, source: { in: ["CHAINLINK", ...SOLANA_PRICE_SOURCES] } },
     orderBy: { observedAt: "desc" },
     take
   });

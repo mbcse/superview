@@ -15,7 +15,7 @@ function num(v: unknown, fallback = 0.5) {
 export type RunCandidate = {
   resolvedTokenId: string | null;
   holdable: boolean;
-  token: { symbol: string; isTradingHalt: boolean } | null;
+  token: { symbol: string; isTradingHalt: boolean; chainId?: number | null; logoUrl?: string | null } | null;
   score: {
     exposure: unknown;
     confidence: unknown;
@@ -40,6 +40,8 @@ type StoredHolding = {
   weightBps: number;
   role?: HoldingRole;
   score?: number;
+  chainId?: number;
+  logoUrl?: string | null;
 };
 
 type StoredBasket = {
@@ -61,13 +63,16 @@ function storedBasket(meta: unknown): StoredBasket | null {
     const symbol = String((h as { symbol?: unknown }).symbol ?? "");
     const weightBps = Number((h as { weightBps?: unknown }).weightBps);
     if (!tokenId || !symbol || !Number.isFinite(weightBps) || weightBps <= 0) continue;
+    const chainId = Number((h as { chainId?: unknown }).chainId);
     rows.push({
       tokenId,
       symbol,
       actionId: String((h as { actionId?: unknown }).actionId ?? "direct"),
       weightBps,
       role: asRole((h as { role?: unknown }).role),
-      score: Number((h as { score?: unknown }).score) || undefined
+      score: Number((h as { score?: unknown }).score) || undefined,
+      chainId: Number.isFinite(chainId) ? chainId : undefined,
+      logoUrl: typeof (h as { logoUrl?: unknown }).logoUrl === "string" ? (h as { logoUrl: string }).logoUrl : null
     });
   }
   if (rows.length < MIN_HOLDINGS) return null;
@@ -91,7 +96,7 @@ function pmWeights(meta: unknown): Map<string, number> {
 function annotate(
   run: RunForPortfolio,
   rows: RunCandidate[],
-  holdings: Array<{ tokenId: string; symbol: string; actionId: string; weightBps: number; role?: HoldingRole; score?: number }>
+  holdings: Array<{ tokenId: string; symbol: string; actionId: string; weightBps: number; role?: HoldingRole; score?: number; chainId?: number; logoUrl?: string | null }>
 ) {
   return holdings.map((h) => {
     const c = rows.find((x) => x.resolvedTokenId === h.tokenId);
@@ -100,7 +105,9 @@ function annotate(
       role: h.role ?? asRole(c?.score?.role),
       rationale: c?.score?.whyInBasket || c?.score?.rationale || `Supports “${run.thesis?.normalizedTake}”.`,
       bullPoints: c?.score?.bullPoints,
-      bearPoints: c?.score?.bearPoints
+      bearPoints: c?.score?.bearPoints,
+      chainId: h.chainId ?? c?.token?.chainId ?? undefined,
+      logoUrl: h.logoUrl ?? c?.token?.logoUrl ?? null
     };
   });
 }

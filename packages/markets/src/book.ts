@@ -1,4 +1,4 @@
-import { SOL_MINT } from "@takeandstake/shared";
+import { BASE_CHAIN_ID, MONAD_CHAIN_ID, SOL_MINT, sameIssuerListing } from "@takeandstake/shared";
 import type { Venue } from "@takeandstake/shared";
 import type { PriceSource } from "./types.js";
 import { bagsTradeQuote } from "./bags.js";
@@ -6,7 +6,8 @@ import { dexScreenerQuotes } from "./dexscreener.js";
 import { jupiterPrices } from "./jupiter.js";
 import { pumpCurveQuotes } from "./pump.js";
 import { quotesDisagree, xstockDeviationBand } from "./tape.js";
-import { xstockPrice } from "./xstocks.js";
+import { xstockBoundPrice, xstockPrice } from "./xstocks.js";
+import { listCoinbaseBaseStocks, pickCoinbaseQuote, quoteByAddress } from "./coinbase-base.js";
 import type { AssetRef, Quote } from "./types.js";
 
 function isNyWeekend(ms = Date.now()) {
@@ -39,7 +40,13 @@ export async function quoteSolanaAssets(assets: AssetRef[]): Promise<Map<string,
   const xstockAssets = assets.filter((a) => a.source === "XSTOCKS");
   const [jup, dex, solUsd] = await Promise.all([
     jupiterPrices([...mints, SOL_MINT]),
-    dexScreenerQuotes(mints),
+    dexScreenerQuotes(mints, {
+      symbols: new Map(
+        assets
+          .filter((a) => a.source === "XSTOCKS")
+          .map((a) => [a.contractAddress, a.xstocksSymbol || a.symbol])
+      )
+    }),
     jupiterPrices([SOL_MINT])
   ]);
   const solPx = solUsd.get(SOL_MINT)?.last ?? jup.get(SOL_MINT)?.last ?? 0;
@@ -71,10 +78,8 @@ export async function quoteSolanaAssets(assets: AssetRef[]): Promise<Map<string,
   const xstocks = new Map<string, Quote>();
   const inSession = !isNyWeekend();
   const band = xstockDeviationBand(inSession);
-  const needRef = xstockAssets.filter((a) => a.xstocksSymbol && !jup.get(a.contractAddress)).slice(0, 12);
-  const refs = await Promise.all(
-    needRef.map(async (a) => [a, await xstockPrice(a.xstocksSymbol!)] as const)
-  );
+  const needRef = xstockAssets.filter((a) => (a.xstocksSymbol || a.symbol) && !jup.get(a.contractAddress)).slice(0, 12);
+  const refs = await Promise.all(needRef.map(async (a) => [a, await xstockBoundPrice(a)] as const));
   for (const [a, ref] of refs) {
     const j = jup.get(a.contractAddress);
     if (ref && j && quotesDisagree(j.last, ref, band)) {
@@ -110,6 +115,67 @@ export async function quoteSolanaAssets(assets: AssetRef[]): Promise<Map<string,
   for (const a of assets) {
     const q = pickQuote(a, byProvider);
     if (q) out.set(a.id, q);
+  }
+  return out;
+}
+
+export async function quoteEvmAssets(assets: AssetRef[]): Promise<Map<string, Quote>> {
+  const out = new Map<string, Quote>();
+  if (!assets.length) return out;
+  const base = assets.filter((a) => a.chainId === BASE_CHAIN_ID);
+  const monad = assets.filter((a) => a.chainId === MONAD_CHAIN_ID);
+  const [baseDex, monadDex, coinbase] = await Promise.all([
+    base.length
+      ? dexScreenerQuotes(
+          base.map((a) => a.contractAddress),
+          { chain: "base", symbols: new Map(base.map((a) => [a.contractAddress, a.symbol])) }
+        )
+      : new Map<string, Quote>(),
+    monad.length
+      ? dexScreenerQuotes(
+          monad.map((a) => a.contractAddress),
+          { chain: "monad", symbols: new Map(monad.map((a) => [a.contractAddress, a.xstocksSymbol || a.symbol])) }
+        )
+      : new Map<string, Quote>(),
+    base.length ? listCoinbaseBaseStocks() : Promise.resolve([])
+  ]);
+  const navByAddress = new Map(coinbase.map((row) => [row.address, row]));
+  const xstockAssets = monad.filter((a) => a.source === "XSTOCKS" && (a.xstocksSymbol || a.symbol));
+  const refs = await Promise.all(xstockAssets.map(async (a) => [a, await xstockBoundPrice(a)] as const));
+  for (const a of assets) {
+    if (a.chainId === BASE_CHAIN_ID) {
+      const nav = navByAddress.get(a.contractAddress.toLowerCase());
+      const bound = Boolean(
+        nav &&
+          sameIssuerListing(
+            { chainId: BASE_CHAIN_ID, address: a.contractAddress, symbol: a.symbol, source: a.source ?? "COINBASE" },
+            { chainId: BASE_CHAIN_ID, address: nav.address, symbol: nav.symbol, source: "COINBASE", isin: nav.isin }
+          )
+      );
+      const picked = pickCoinbaseQuote({
+        assetId: a.id,
+        navPrice: bound ? nav?.navPrice ?? null : null,
+        navFresh: bound && Boolean(nav?.navFresh),
+        navUpdatedAt: bound ? nav?.navUpdatedAt : null,
+        dex: quoteByAddress(baseDex, a.contractAddress)
+      });
+      if (picked) out.set(a.id, picked);
+      continue;
+    }
+    const dex = quoteByAddress(monadDex, a.contractAddress);
+    const ref = refs.find(([t]) => t.id === a.id)?.[1];
+    const issuer = ref && ref > 0 ? ref : a.source === "XSTOCKS" ? await xstockPrice(a.xstocksSymbol || a.symbol) : null;
+    const last = issuer && issuer > 0 ? issuer : dex?.last;
+    if (!last || last <= 0) continue;
+    out.set(a.id, {
+      assetId: a.id,
+      last,
+      chg: dex?.chg ?? null,
+      liquidityUsd: dex?.liquidityUsd ?? null,
+      observedAt: Date.now(),
+      provider: issuer && issuer > 0 ? "XSTOCKS" : "DEXSCREENER",
+      halt: Boolean(a.venue === "KURU_FLOW" && !dex)
+    });
   }
   return out;
 }

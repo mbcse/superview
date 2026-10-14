@@ -1,5 +1,5 @@
 import { prisma } from "@takeandstake/db";
-import { displaySymbol } from "@takeandstake/shared";
+import { displaySymbol, parseAllowedChains, underlyingTicker } from "@takeandstake/shared";
 import { instructPocket } from "@takeandstake/ai";
 import type { Env } from "@takeandstake/config";
 import { depositPaperUsd, executePaperRebalance, runDryRunInvest, weightsFromTrimAdd } from "./paper-invest.js";
@@ -46,8 +46,18 @@ export async function handlePocketChat(pocketId: string, userId: string, body: s
     const holdings = target?.holdings ?? [];
     let addTokenId: string | undefined;
     if (parsed.intent === "add_name") {
+      const ticker = underlyingTicker(symbol);
       const token = await prisma.stockToken.findFirst({
-        where: { chainId: 4663, symbol: { in: [symbol, `RH${symbol}`] }, status: "ACTIVE" }
+        where: {
+          status: "ACTIVE",
+          world: pocket.take.world,
+          chainId: { in: parseAllowedChains(undefined, pocket.take.world) },
+          OR: [
+            { symbol: { in: [symbol, `RH${symbol}`] } },
+            { underlyingTicker: ticker }
+          ]
+        },
+        orderBy: { liquidityUsd: "desc" }
       });
       addTokenId = token?.id;
     }

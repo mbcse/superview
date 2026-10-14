@@ -22,7 +22,7 @@ const VsChart = dynamic(() => import("@/components/charts/vs-chart").then((m) =>
 
 const RANGES = ["1D", "1W", "1M", "YTD"] as const;
 
-type Holding = { symbol: string; weightBps: number; last: number | null; chgPct: number | null; feed?: boolean; rationale?: string };
+type Holding = { symbol: string; weightBps: number; last: number | null; chgPct: number | null; feed?: boolean; rationale?: string; chainId?: number | null; logoUrl?: string | null };
 type TakeRow = {
   id: string;
   sentence?: string;
@@ -226,7 +226,7 @@ export default function DashboardClient({ initial }: { initial: TakeRow[] }) {
         <h3 className="text-[16px] font-semibold">Portfolio</h3>
         <div className="mt-2">
           {(featured?.holdings ?? []).map((h) => (
-            <HoldingRow key={h.symbol} symbol={h.symbol} weightBps={h.weightBps} last={h.last} chgPct={h.chgPct} rationale={h.rationale} />
+            <HoldingRow key={h.symbol} symbol={h.symbol} weightBps={h.weightBps} last={h.last} chgPct={h.chgPct} rationale={h.rationale} chainId={h.chainId ?? undefined} logoUrl={h.logoUrl} />
           ))}
         </div>
       </section>

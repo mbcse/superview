@@ -4,6 +4,7 @@ import type { AssetSource } from "./worlds.js";
 export const SOURCE_RESTRICTED: Record<AssetSource | "MEMES", string[]> = {
   ROBINHOOD: ["US", "GB", "CA", "CH", "AE"],
   XSTOCKS: ["US", "GB", "CA", "CH", "AE"],
+  COINBASE: ["US", "GB", "CA", "CH", "AE"],
   BAGS: ["US"],
   PUMPFUN: ["US"],
   OTHER: ["US"],

@@ -27,6 +27,15 @@ describe("live grants", () => {
     assert.equal(grantAllows([], usdg), false);
   });
 
+  it("keeps Base USDC and Monad AUSD in the server allowlist", () => {
+    const usdc = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+    const ausd = "0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a";
+    const contracts = liveGrantContracts([], "", usdg, [usdc, ausd]);
+    assert.ok(contracts.includes(usdg.toLowerCase()));
+    assert.ok(contracts.includes(usdc.toLowerCase()));
+    assert.ok(contracts.includes(ausd.toLowerCase()));
+  });
+
   it("does not accept a client contract outside the server allowlist", () => {
     const contracts = liveGrantContracts(["0x1111111111111111111111111111111111111111"], "", usdg);
     assert.deepEqual(contracts, [usdg.toLowerCase()]);

@@ -7,7 +7,10 @@ export type PriceSource =
   | "JUPITER"
   | "BAGS"
   | "PUMPFUN"
-  | "DEXSCREENER";
+  | "DEXSCREENER"
+  | "AERODROME"
+  | "KURU"
+  | "ISSUER";
 
 export type Desk = { world: World; chainId: number };
 
@@ -40,6 +43,7 @@ export type SwapReq = {
   amountUsd: number;
   owner: string;
   slippageBps?: number;
+  sellAmount?: string;
 };
 
 export type SwapQuote = {

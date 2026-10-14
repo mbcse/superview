@@ -44,7 +44,9 @@ test("publishes the researched basket from the draft event", () => {
       actionId: "direct",
       weightBps: 1900,
       role: i < 3 ? "direct" : "indirect",
-      score: 0.4
+      score: 0.4,
+      chainId: i === 0 ? 8453 : 4663,
+      logoUrl: i === 0 ? "https://metadata.coinbase.com/x.png" : null
     }))
   };
   const out = portfolioFromRun(withDraftPayload(run, payload));
@@ -52,4 +54,6 @@ test("publishes the researched basket from the draft event", () => {
   if (!out.ok) return;
   assert.equal(out.holdings.length, 5);
   assert.equal(out.holdings[0]?.weightBps, 1900);
+  assert.equal(out.holdings[0]?.chainId, 8453);
+  assert.equal(out.holdings[1]?.chainId, 4663);
 });

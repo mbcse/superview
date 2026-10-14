@@ -2,11 +2,13 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
 import { loadEnv } from "@takeandstake/config";
-import { parseWorld, parseChainId, cashTokenId, DESKS, isMintOrContract, sourceRestricted } from "@takeandstake/shared";
-import { syncBagsCatalog, syncJupiterMemeCatalog, syncXStocksCatalog } from "@takeandstake/markets";
+import { parseWorld, parseChainId, cashTokenId, DESKS, isMintOrContract, PAPER_USD_TOKEN_ID, sourceRestricted } from "@takeandstake/shared";
+import { syncBagsCatalog, syncCoinbaseBaseCatalog, syncJupiterMemeCatalog, syncXStocksCatalog } from "@takeandstake/markets";
 import { prisma } from "@takeandstake/db";
 import { depositPaperUsd, executePaperRebalance, runDryRunInvest, withdrawPaperUsd } from "./services/paper-invest.js";
 import { runLiveInvest } from "./services/live-invest.js";
+import { runLiveSell, runLiveWithdraw } from "./services/live-exit.js";
+import { confirmMeraLiveOrder, prepareMeraLiveOrder, userUsesMeraSigner } from "./services/mera-live.js";
 import { handlePocketChat } from "./services/pocket-chat.js";
 import { portfolioFromRun, withDraftPayload } from "./services/portfolio-from-run.js";
 import { fillCompanyAbout, enrichStale } from "@takeandstake/ai";
@@ -36,9 +38,10 @@ import { STOCK_TOKEN_COPY, backRequestSchema, backingPrivacySchema, commentSchem
 import { optionalAuth, requireAdmin, requireAuth, requirePocketOwner, requireTakeAuthor, verifyAlchemyWebhook, verifyPrivyWebhook } from "./middleware/auth.js";
 import { canViewTake, loadViewableTake, requirePublishedTake } from "./take-access.js";
 import { liveGrantContracts } from "./wallet-bind.js";
-import { USDG_MAINNET } from "@takeandstake/chain";
+import { AUSD_MONAD, USDC_BASE, USDG_MAINNET } from "@takeandstake/chain";
 import { meRouter } from "./routes/me.js";
 import { researchRouter } from "./routes/research.js";
+import { meraAuthRouter } from "./routes/mera-auth.js";
 import { socialRouter } from "./routes/social.js";
 import { deskRouter } from "./routes/desk.js";
 import { streamRouter } from "./routes/stream.js";
@@ -89,6 +92,7 @@ app.use((req, res, next) => {
   });
   next();
 });
+app.use(meraAuthRouter);
 app.use(meRouter);
 app.use(researchRouter);
 app.use(socialRouter);
@@ -203,7 +207,8 @@ app.get("/v1/catalog", async (req, res) => {
     logoUrl: t.logoUrl,
     liquidityUsd: t.liquidityUsd,
     universe: t.universe,
-    companyKey: t.universe?.isin || t.universe?.legalName || t.name
+    underlyingTicker: t.underlyingTicker,
+    companyKey: t.underlyingTicker || t.universe?.isin || t.universe?.legalName || t.name
   }));
   const groups = new Map<string, typeof rows>();
   for (const row of rows) {
@@ -232,12 +237,14 @@ app.get("/v1/catalog", async (req, res) => {
 app.post("/v1/catalog/sync", requireAdmin, async (_req, res) => {
   try {
     const r = await syncRobinhoodCatalog();
-    const xstocks = await syncXStocksCatalog().catch((e) => ({ error: String(e) }));
+    const xstocks = await syncXStocksCatalog("Solana").catch((e) => ({ error: String(e) }));
+    const monad = await syncXStocksCatalog("Monad").catch((e) => ({ error: String(e) }));
+    const base = await syncCoinbaseBaseCatalog().catch((e) => ({ error: String(e) }));
     const bags = await syncBagsCatalog().catch((e) => ({ error: String(e) }));
     const memes = await syncJupiterMemeCatalog().catch((e) => ({ error: String(e) }));
     const actions = await syncCorporateActions().catch((e) => ({ error: String(e) }));
     const enrich = await enrichStale(12);
-    res.json({ ...r, xstocks, bags, memes, actions, enrich });
+    res.json({ ...r, xstocks, monad, base, bags, memes, actions, enrich });
   } catch (e) {
     res.status(502).json({ error: "catalog_sync_failed", detail: String(e) });
   }
@@ -522,9 +529,17 @@ app.post("/v1/takes/:id/publish", requireAuth, async (req, res) => {
       where: { takeId: take.id },
       orderBy: { number: "desc" }
     });
+    const tokens = await prisma.stockToken.findMany({
+      where: { id: { in: constructed.holdings.map((h) => h.tokenId) } }
+    });
+    const tokenById = new Map(tokens.map((t) => [t.id, t]));
     const canonical = {
       sentence: run.thesis?.normalizedTake,
-      holdings: constructed.holdings,
+      holdings: constructed.holdings.map((h) => ({
+        ...h,
+        chainId: tokenById.get(h.tokenId)?.chainId ?? null,
+        contractAddress: tokenById.get(h.tokenId)?.contractAddress ?? null
+      })),
       cashBps: constructed.cashBps
     };
     const receipt = canonicalReceipt(canonical);
@@ -548,6 +563,9 @@ app.post("/v1/takes/:id/publish", requireAuth, async (req, res) => {
       where: { id: take.id },
       data: { status: "PUBLISHED", currentRevisionId: revision.id }
     });
+    if (tokens.length) {
+      await redis.sadd("hot:sse", ...tokens.map((t) => t.id)).catch(() => {});
+    }
     await prisma.takeManagement.upsert({
       where: { takeId: take.id },
       update: {},
@@ -615,6 +633,17 @@ app.post("/v1/takes/:id/invest", requireAuth, async (req, res) => {
   if (!(await hitRateLimit(redis, `invest:${req.user!.id}`, LIMIT_INVEST.max, LIMIT_INVEST.windowMs))) {
     return res.status(429).json({ error: "rate_limited" });
   }
+  if (await userUsesMeraSigner(req.user!.id)) {
+    const prepared = await prepareMeraLiveOrder(
+      pocket.id,
+      env,
+      req.user!.id,
+      Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : undefined,
+      idempotencyKey
+    );
+    if ("error" in prepared) return res.status(400).json(prepared);
+    return res.json(prepared);
+  }
   res.json(await enqueueLiveOrder({ pocketId: pocket.id, userId: req.user!.id, amountUsd, idempotencyKey }));
 });
 
@@ -658,7 +687,11 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
       update: { mode: parsed.data.mandateMode },
       create: {
         pocketId: pocket.id,
-        mode: take.world === "MEMES" && parsed.data.level === "LIVE" ? "APPROVAL" : parsed.data.mandateMode,
+        mode:
+          (take.world === "MEMES" && parsed.data.level === "LIVE") ||
+          (parsed.data.level === "LIVE" && (await userUsesMeraSigner(user.id)))
+            ? "APPROVAL"
+            : parsed.data.mandateMode,
         cashMinBps: parsed.data.cashMinBps ?? 0,
         cashMaxBps: parsed.data.cashMaxBps ?? 2000,
         maxTurnoverDailyBps: parsed.data.maxTurnoverDailyBps ?? 1000,
@@ -666,7 +699,7 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
         allowNewNames: parsed.data.allowNewNames ?? true
       }
     });
-    const cashId = cashTokenId(take.world ?? "STOCKS", take.chainId ?? 4663);
+    const cashId = parsed.data.level === "DRY_RUN" ? PAPER_USD_TOKEN_ID : cashTokenId(take.world ?? "STOCKS", take.chainId ?? 4663);
     const cash = await prisma.ledgerAccount.upsert({
       where: { pocketId_kind_tokenId: { pocketId: pocket.id, kind: "CASH", tokenId: cashId } },
       update: {},
@@ -715,7 +748,7 @@ app.post("/v1/takes/:id/back", requireAuth, async (req, res) => {
   }
   if (parsed.data.level === "LIVE") {
     const auto = await prisma.featureFlag.findUnique({ where: { key: "auto_live" } });
-    if (auto?.enabled && take.status === "PUBLISHED") {
+    if (auto?.enabled && take.status === "PUBLISHED" && !(await userUsesMeraSigner(user.id))) {
       invest = await runLiveInvest(pocket.id, env, user.id);
     }
   }
@@ -754,7 +787,17 @@ app.post("/v1/pockets/:id/deposit", requireAuth, async (req, res) => {
 app.post("/v1/pockets/:id/withdraw", requireAuth, async (req, res) => {
   const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
   if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
-  if (owned.pocket.mode === "LIVE") return res.status(409).json({ error: "live_withdraw_disabled" });
+  if (owned.pocket.mode === "LIVE") {
+    if (!(await hitRateLimit(redis, `withdraw:${req.user!.id}`, LIMIT_WITHDRAW.max, LIMIT_WITHDRAW.windowMs))) {
+      return res.status(429).json({ error: "rate_limited" });
+    }
+    const amountUsd = Number(req.body?.amountUsd);
+    const result = await runLiveWithdraw(owned.pocket.id, env, req.user!.id, amountUsd);
+    if ("error" in result) {
+      return res.status(result.error === "insufficient_cash" ? 409 : 400).json(result);
+    }
+    return res.json({ ...result, kind: "live" });
+  }
   const result = await withdrawPaperUsd(owned.pocket.id, Number(req.body?.amountUsd));
   if ("error" in result) {
     return res.status(result.error === "insufficient_cash" ? 409 : 400).json({ error: result.error });
@@ -766,18 +809,66 @@ app.post("/v1/pockets/:id/live-invest", requireAuth, async (req, res) => {
   const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
   if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
   const amountUsd = Number(req.body?.amountUsd);
+  const spend = Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : undefined;
   const idempotencyKey = String(req.body?.idempotencyKey ?? `live:${owned.pocket.id}:${Date.now()}`);
   if (!(await hitRateLimit(redis, `invest:${req.user!.id}`, LIMIT_INVEST.max, LIMIT_INVEST.windowMs))) {
     return res.status(429).json({ error: "rate_limited" });
+  }
+  if (await userUsesMeraSigner(req.user!.id)) {
+    const prepared = await prepareMeraLiveOrder(owned.pocket.id, env, req.user!.id, spend, idempotencyKey);
+    if ("error" in prepared) return res.status(400).json(prepared);
+    return res.json(prepared);
   }
   res.json(
     await enqueueLiveOrder({
       pocketId: owned.pocket.id,
       userId: req.user!.id,
-      amountUsd: Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : undefined,
+      amountUsd: spend,
       idempotencyKey
     })
   );
+});
+
+app.post("/v1/pockets/:id/live-sell", requireAuth, async (req, res) => {
+  const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
+  if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
+  if (owned.pocket.mode !== "LIVE") return res.status(409).json({ error: "not_live" });
+  if (!(await hitRateLimit(redis, `invest:${req.user!.id}`, LIMIT_INVEST.max, LIMIT_INVEST.windowMs))) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  const result = await runLiveSell(owned.pocket.id, env, req.user!.id, {
+    tokenId: req.body?.tokenId ? String(req.body.tokenId) : undefined,
+    amountUsd: Number.isFinite(Number(req.body?.amountUsd)) ? Number(req.body.amountUsd) : undefined,
+    all: Boolean(req.body?.all)
+  });
+  if ("error" in result) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.post("/v1/pockets/:id/live-withdraw", requireAuth, async (req, res) => {
+  const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
+  if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
+  if (!(await hitRateLimit(redis, `withdraw:${req.user!.id}`, LIMIT_WITHDRAW.max, LIMIT_WITHDRAW.windowMs))) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  const result = await runLiveWithdraw(owned.pocket.id, env, req.user!.id, Number(req.body?.amountUsd));
+  if ("error" in result) return res.status(result.error === "insufficient_cash" ? 409 : 400).json(result);
+  res.json(result);
+});
+
+app.post("/v1/pockets/:id/live-confirm", requireAuth, async (req, res) => {
+  const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
+  if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
+  if (!(await userUsesMeraSigner(req.user!.id))) return res.status(403).json({ error: "not_mera" });
+  if (!(await hitRateLimit(redis, `invest:${req.user!.id}`, LIMIT_INVEST.max, LIMIT_INVEST.windowMs))) {
+    return res.status(429).json({ error: "rate_limited" });
+  }
+  const orderId = String(req.body?.orderId ?? "");
+  const signed = Array.isArray(req.body?.signed) ? req.body.signed : [];
+  if (!orderId || !signed.length) return res.status(400).json({ error: "bad_request" });
+  const result = await confirmMeraLiveOrder(orderId, env, req.user!.id, signed);
+  if ("error" in result) return res.status(400).json(result);
+  res.json(result);
 });
 
 app.post("/v1/me/memes-ack", requireAuth, async (req, res) => {
@@ -822,7 +913,10 @@ app.post("/v1/wallets/:id/grant", requireAuth, async (req, res) => {
   if (!wallet) return res.status(404).json({ error: "not_found" });
   if (!wallet.privyWalletId) return res.status(400).json({ error: "no_privy_wallet" });
   const privySignerId = wallet.privyWalletId;
-  const contracts = liveGrantContracts(req.body?.allowedContracts, env.LIVE_ALLOWED_CONTRACTS, USDG_MAINNET);
+  const contracts = liveGrantContracts(req.body?.allowedContracts, env.LIVE_ALLOWED_CONTRACTS, USDG_MAINNET, [
+    USDC_BASE,
+    AUSD_MONAD
+  ]);
   const grant = await prisma.$transaction(async (tx) => {
     await tx.signerGrant.updateMany({
       where: { walletId: wallet.id, revokedAt: null },
@@ -890,7 +984,7 @@ app.get("/v1/pockets", requireAuth, async (req, res) => {
       proposals: { where: { status: "PENDING" } },
       chats: { orderBy: { createdAt: "asc" }, take: 80, include: { user: { select: { handle: true, displayName: true } } } },
       accounts: { include: { entries: true } },
-      orders: { orderBy: { createdAt: "desc" }, take: 6, include: { legs: { include: { quotes: true } } } }
+      orders: { orderBy: { createdAt: "desc" }, take: 6, include: { legs: { include: { quotes: true, txs: true } } } }
     }
   });
   const out = [];
@@ -910,7 +1004,11 @@ app.get("/v1/pockets", requireAuth, async (req, res) => {
 app.post("/v1/pockets/:id/mandate", requireAuth, async (req, res) => {
   const owned = await requirePocketOwner(req.user!.id, pid(req, "id"));
   if (!owned.ok) return res.status(owned.status).json({ error: owned.error });
-  const mode = req.body?.mode === "AUTO" ? "AUTO" : "APPROVAL";
+  const wantsAuto = req.body?.mode === "AUTO";
+  if (wantsAuto && owned.pocket.mode === "LIVE" && (await userUsesMeraSigner(req.user!.id))) {
+    return res.status(409).json({ error: "mera_requires_client_sign" });
+  }
+  const mode = wantsAuto ? "AUTO" : "APPROVAL";
   const pocket = owned.pocket;
   const mandate = await prisma.mandate.upsert({
     where: { pocketId: pocket.id },

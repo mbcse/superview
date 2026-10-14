@@ -1,5 +1,6 @@
 import { prisma } from "@takeandstake/db";
 import { CHAINLINK_FEEDS_DIRECTORY, RH_ASSETS_URL, RHNVDA_FEED, RHSPY_FEED } from "@takeandstake/chain";
+import { ROBINHOOD_CHAIN_ID, normalizeTokenAddress, underlyingTicker } from "@takeandstake/shared";
 
 const KNOWN_FEEDS: Record<string, `0x${string}`> = {
   RHNVDA: RHNVDA_FEED,
@@ -34,18 +35,25 @@ export async function syncRobinhoodCatalog() {
     data: { hash: String(Date.now()) }
   });
   const seen = new Set<string>();
+  const claimed = new Map<string, string>();
   let count = 0;
   const feeds = await loadChainlinkFeeds();
 
   for (const asset of assets) {
     const symbol = String(asset.tokenSymbol ?? "").toUpperCase();
-    const address = asset.deployments?.find((d) => d.chainId === 4663)?.contractAddress ?? "";
-    if (!symbol || !address) continue;
-    seen.add(symbol);
+    const address = normalizeTokenAddress(
+      asset.deployments?.find((d) => d.chainId === ROBINHOOD_CHAIN_ID)?.contractAddress ?? "",
+      ROBINHOOD_CHAIN_ID
+    );
+    const ticker = underlyingTicker(symbol, "ROBINHOOD");
+    if (!symbol || !address || !ticker) continue;
+    if (claimed.has(ticker) && claimed.get(ticker) !== address) continue;
+    claimed.set(ticker, address);
+    seen.add(address);
     const name = displayName(String(asset.tokenName ?? symbol), symbol);
     const feedAddress = feeds.get(symbol) ?? KNOWN_FEEDS[symbol] ?? undefined;
     const token = await prisma.stockToken.upsert({
-      where: { chainId_contractAddress: { chainId: 4663, contractAddress: address } },
+      where: { chainId_contractAddress: { chainId: ROBINHOOD_CHAIN_ID, contractAddress: address } },
       update: {
         symbol,
         name,
@@ -53,6 +61,7 @@ export async function syncRobinhoodCatalog() {
         world: "STOCKS",
         source: "ROBINHOOD",
         venue: "RH_BOOK",
+        underlyingTicker: ticker,
         decimals: 18,
         rhjId: asset.id,
         isin: asset.isin,
@@ -68,10 +77,11 @@ export async function syncRobinhoodCatalog() {
         symbol,
         name,
         contractAddress: address,
-        chainId: 4663,
+        chainId: ROBINHOOD_CHAIN_ID,
         world: "STOCKS",
         source: "ROBINHOOD",
         venue: "RH_BOOK",
+        underlyingTicker: ticker,
         decimals: 18,
         snapshotId: snapshot.id,
         rhjId: asset.id,
@@ -91,13 +101,20 @@ export async function syncRobinhoodCatalog() {
     count += 1;
   }
 
-  await prisma.stockToken.updateMany({
-    where: { chainId: 4663, symbol: { notIn: [...seen] }, status: "ACTIVE" },
-    data: { status: "INACTIVE" }
-  });
+  if (count) {
+    await prisma.stockToken.updateMany({
+      where: {
+        chainId: ROBINHOOD_CHAIN_ID,
+        source: "ROBINHOOD",
+        status: "ACTIVE",
+        contractAddress: { notIn: [...seen] }
+      },
+      data: { status: "INACTIVE" }
+    });
+  }
 
   const fake = await prisma.stockToken.findMany({
-    where: { chainId: 4663, contractAddress: { startsWith: "0xRH" } },
+    where: { chainId: ROBINHOOD_CHAIN_ID, contractAddress: { startsWith: "0xRH" } },
     select: { id: true }
   });
   for (const row of fake) {

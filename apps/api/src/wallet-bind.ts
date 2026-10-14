@@ -29,8 +29,8 @@ function requestedIds(requested: unknown): string[] {
   return [];
 }
 
-export function liveGrantContracts(requested: unknown, envAllow: string, usdg: string) {
-  const allow = new Set<string>([usdg.toLowerCase()]);
+export function liveGrantContracts(requested: unknown, envAllow: string, usdg: string, extraCash: string[] = []) {
+  const allow = new Set<string>([usdg.toLowerCase(), ...extraCash.map((c) => c.toLowerCase())]);
   for (const part of envAllow.split(/[\s,]+/)) {
     if (isHexAddress(part) || part.length > 20) allow.add(part.toLowerCase());
   }

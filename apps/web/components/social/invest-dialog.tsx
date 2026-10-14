@@ -7,8 +7,12 @@ import { X } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { useAuthedFetch } from "@/components/use-authed-fetch";
 import { ApiError } from "@/lib/api";
+import { completeLiveInvest } from "@/lib/live-order";
+import { useWalletCash } from "@/components/wallet-cash";
+import { AddCashButton } from "@/components/add-cash";
+import { fmtUsd } from "@/lib/fmt";
 
-const PRESETS = [100, 250, 500, 1000];
+const PRESETS = [1, 5, 25, 100];
 const EASE = [0.23, 1, 0.32, 1] as const;
 
 function formatMoney(n: number) {
@@ -31,7 +35,8 @@ export function InvestDialog({
   const fetchApi = useAuthedFetch();
   const router = useRouter();
   const reduce = useReducedMotion();
-  const [amount, setAmount] = useState("250");
+  const { wallet } = useWalletCash();
+  const [amount, setAmount] = useState("5");
   const [reveal, setReveal] = useState(false);
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -43,12 +48,14 @@ export function InvestDialog({
   const usd = Number(amount);
   const valid = Number.isFinite(usd) && usd >= 1;
   const live = mode === "LIVE";
+  const homeCash = wallet?.homeCashUsd ?? 0;
+  const needCash = live && valid && homeCash + 1e-6 < usd;
 
   useEffect(() => {
     setDone(false);
     setBusy(false);
     setError("");
-    setAmount("250");
+    setAmount("5");
     setReveal(false);
     setMode("DRY_RUN");
     setOrderId(null);
@@ -57,8 +64,8 @@ export function InvestDialog({
 
   useEffect(() => {
     if (!takeId) return;
-    fetchApi<{ liveEnabled?: boolean; wallet?: { id?: string } }>("/v1/wallet")
-      .then((d) => setLiveOk(Boolean(d.liveEnabled && d.wallet)))
+    fetchApi<{ liveEnabled?: boolean; wallet?: { id?: string }; signer?: string | null; wallets?: Array<{ id?: string }> }>("/v1/wallet")
+      .then((d) => setLiveOk(Boolean(d.liveEnabled && (d.signer === "MERA" || d.wallet || (d.wallets?.length ?? 0) > 0))))
       .catch(() => setLiveOk(false));
   }, [takeId, fetchApi]);
 
@@ -85,10 +92,12 @@ export function InvestDialog({
       });
       let filled = r.invest;
       if (r.pocket?.id && !filled?.status && !filled?.fills) {
-        filled = await fetchApi<{ fills?: number; skipped?: number; status?: string; orderId?: string }>(
-          live ? `/v1/pockets/${r.pocket.id}/live-invest` : `/v1/pockets/${r.pocket.id}/dry-run-invest`,
-          { method: "POST", body: JSON.stringify({ amountUsd: usd }) }
-        );
+        filled = live
+          ? await completeLiveInvest(fetchApi, r.pocket.id, usd)
+          : await fetchApi<{ fills?: number; skipped?: number; status?: string; orderId?: string }>(
+              `/v1/pockets/${r.pocket.id}/dry-run-invest`,
+              { method: "POST", body: JSON.stringify({ amountUsd: usd }) }
+            );
       }
       setOrderId(filled?.orderId ?? null);
       setFill({ status: filled?.status, fills: filled?.fills, skipped: filled?.skipped });
@@ -166,14 +175,14 @@ export function InvestDialog({
                   ) : (
                     <>
                       <span className="font-mono text-ink">{formatMoney(usd)}</span>{" "}
-                      {live ? "of USDG is now tracking" : "of paper money is now tracking"}
+                      {live ? "of live cash is now tracking" : "of paper money is now tracking"}
                     </>
                   )}
                 </p>
                 <p className="mt-4 text-[16px] font-medium leading-snug text-ink">“{sentence ?? "View"}”</p>
                 <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[12px] font-medium text-ink">
                   <span className="h-1.5 w-1.5 rounded-full bg-teal" />
-                  {live ? "Live USDG" : "Paper · no real money"}
+                  {live ? "Live cash" : "Paper · no real money"}
                 </span>
                 <Button
                   className="mt-8"
@@ -214,7 +223,7 @@ export function InvestDialog({
                       onClick={() => setMode("LIVE")}
                       className={`h-8 rounded-full px-3 text-[12px] ${live ? "bg-mist text-ink" : "text-muted"}`}
                     >
-                      Live USDG
+                      Live
                     </button>
                   </div>
                 ) : (
@@ -223,6 +232,17 @@ export function InvestDialog({
                     Paper · no real money
                   </span>
                 )}
+                {live ? (
+                  <p className="mt-4 text-[13px] text-muted">
+                    Available cash {fmtUsd(homeCash)}
+                    {needCash ? " · add cash to cover this amount" : ""}
+                  </p>
+                ) : null}
+                {needCash ? (
+                  <div className="mt-3">
+                    <AddCashButton amount={String(Math.max(5, Math.ceil(usd)))} label="Add cash" />
+                  </div>
+                ) : null}
                 <label htmlFor="invest-amount" className="mt-8 block text-[13px] text-muted">
                   Amount
                 </label>
@@ -254,12 +274,10 @@ export function InvestDialog({
                 </div>
                 <p className="mt-8 text-[13px] leading-relaxed text-muted">
                   {live
-                    ? chainId === 101
-                      ? "This spends live USDC from your Solana wallet after you confirm. Keep 0.03 SOL in the wallet for fees."
-                      : "This spends real USDG from your Privy wallet after you confirm. Stock tokens are economic exposure, not share ownership."
+                    ? "This spends your USDC. We move it onto the desk that holds the name. You do not need ETH or SOL."
                     : world === "MEMES"
-                      ? "Paper uses live marks without live money. Meme quotes older than two minutes are treated as stale."
-                      : "Paper uses live marks without live money. Stock tokens are economic exposure, not share ownership."}
+                      ? "Paper uses one USD balance and live marks, no live money. Meme quotes older than two minutes are treated as stale."
+                      : "Paper uses one USD balance and live marks, no live money. Stock tokens are economic exposure, not share ownership."}
                 </p>
                 <label className="mt-4 flex items-start gap-3 text-[13px] text-ink">
                   <input
@@ -271,8 +289,8 @@ export function InvestDialog({
                   Show this amount on my view
                 </label>
                 {error ? <p className="mt-3 text-sm text-down">{error}</p> : null}
-                <Button type="submit" size="lg" variant="primary" className="mt-4 w-full" disabled={busy || !valid}>
-                  {busy ? "Investing…" : valid ? `Invest ${formatMoney(usd)}` : "Invest"}
+                <Button type="submit" size="lg" variant="primary" className="mt-4 w-full" disabled={busy || !valid || needCash}>
+                  {busy ? "Investing…" : needCash ? "Add cash first" : valid ? `Invest ${formatMoney(usd)}` : "Invest"}
                 </Button>
               </form>
             )}

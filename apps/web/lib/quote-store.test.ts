@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeQuote, type LiveQuote } from "./quote-store";
+import { applyQuotes, getQuote, mergeQuote, type LiveQuote } from "./quote-store";
 
 const base: LiveQuote = { symbol: "TEM", last: 82.2, bid: 82.1, ask: 82.3, halt: false, chgPct: 0.001 };
 
@@ -38,5 +38,13 @@ describe("mergeQuote", () => {
     const r = mergeQuote(first, { ...base, chgPct: 0.012 });
     expect(r.changed).toBe(true);
     expect(r.quote.seq).toBe((first.seq ?? 0) + 1);
+  });
+
+  it("resolves SMRc and FLNCx to the company cash print", () => {
+    applyQuotes([{ symbol: "SMR", last: 7.46, bid: 7.45, ask: 7.47, halt: false, chgPct: 0.01 }]);
+    applyQuotes([{ symbol: "FLNC", last: 7.66, bid: 7.65, ask: 7.67, halt: false, chgPct: -0.02 }]);
+    expect(getQuote("SMRc")?.last).toBe(7.46);
+    expect(getQuote("FLNCx")?.last).toBe(7.66);
+    expect(getQuote("FLNC")?.last).toBe(7.66);
   });
 });

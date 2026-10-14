@@ -2,7 +2,7 @@
 
 import { motion, useReducedMotion } from "motion/react";
 
-export type StreamItem = { stage: string; message: string; at?: string };
+export type StreamItem = { stage: string; message: string; at?: string; payload?: Record<string, unknown> };
 
 export function ResearchStream({ items }: { items: StreamItem[] }) {
   const reduce = useReducedMotion();

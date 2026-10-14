@@ -6,6 +6,7 @@ const takeSentenceObject = z.object({
   falsifier: z.string().optional(),
   world: z.enum(["STOCKS", "MEMES"]).optional().default("STOCKS"),
   chainId: z.coerce.number().int().optional(),
+  allowedChains: z.array(z.coerce.number().int()).optional(),
   parentTakeId: z.string().optional(),
   lens: z.enum(["BELIEF", "SKY"]).optional().default("BELIEF"),
   astrologySystem: z.enum(["VEDIC", "WESTERN"]).optional(),

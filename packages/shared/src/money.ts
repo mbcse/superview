@@ -35,3 +35,14 @@ export function roundMoney(value: number, decimals = 2): number {
   const f = 10 ** decimals;
   return Math.round(value * f) / f;
 }
+
+/** Prisma Decimal(38, 18) prices must stay finite and inside the integer width. */
+export const SNAPSHOT_PRICE_MAX = 1e16;
+/** Prisma Decimal(38, 2) notionals (volume / liquidity). */
+export const SNAPSHOT_VOLUME_MAX = 1e15;
+
+export function finiteDecimal(value: unknown, max: number): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0 || n > max) return null;
+  return n;
+}

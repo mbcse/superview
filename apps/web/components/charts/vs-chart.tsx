@@ -82,12 +82,14 @@ export function VsChart({
   points,
   liveVs,
   summary,
-  range
+  range,
+  title = "vs S&P 500"
 }: {
   points: VsPoint[];
   liveVs?: number | null;
   summary?: string;
   range?: string;
+  title?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -142,7 +144,7 @@ export function VsChart({
       topColor: "rgba(50, 117, 100, 0.22)",
       bottomColor: "rgba(50, 117, 100, 0.02)",
       lineWidth: 2,
-      title: "vs S&P 500",
+      title,
       lastValueVisible: true,
       priceLineVisible: false
     });
@@ -165,7 +167,7 @@ export function VsChart({
       bookRef.current = null;
       zeroRef.current = null;
     };
-  }, [range]);
+  }, [range, title]);
 
   useEffect(() => {
     const book = bookRef.current;

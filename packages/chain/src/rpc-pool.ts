@@ -1,5 +1,5 @@
 import { fallback, http, type Transport } from "viem";
-import { ROBINHOOD_CHAIN_ID } from "./constants.js";
+import { BASE_CHAIN_ID, MONAD_CHAIN_ID, ROBINHOOD_CHAIN_ID } from "./constants.js";
 
 export const CHAINLIST_RPCS_URL = "https://chainlist.org/rpcs.json";
 
@@ -46,7 +46,43 @@ export function parseChainlistRpcs(payload: unknown, chainId = ROBINHOOD_CHAIN_I
 }
 
 export function envRpcUrls(source: NodeJS.ProcessEnv = process.env): string[] {
+  return envRpcUrlsFor(ROBINHOOD_CHAIN_ID, source);
+}
+
+export function envRpcUrlsFor(chainId: number, source: NodeJS.ProcessEnv = process.env): string[] {
+  if (chainId === BASE_CHAIN_ID) return splitRpcUrls([source.BASE_RPC_URL ?? "", source.BASE_RPC_URLS ?? ""]);
+  if (chainId === MONAD_CHAIN_ID) return splitRpcUrls([source.MONAD_RPC_URL ?? "", source.MONAD_RPC_URLS ?? ""]);
   return splitRpcUrls([source.ALCHEMY_RPC_URL ?? "", source.ROBINHOOD_RPC_URL ?? "", source.ROBINHOOD_RPC_URLS ?? ""]);
+}
+
+export const DEFAULT_RPCS: Record<number, readonly string[]> = {
+  [ROBINHOOD_CHAIN_ID]: DEFAULT_RH_RPCS,
+  [BASE_CHAIN_ID]: ["https://mainnet.base.org"],
+  [MONAD_CHAIN_ID]: ["https://rpc.monad.xyz"]
+};
+
+export function mergeRpcUrls(
+  chainId: number,
+  preferred?: string | readonly string[] | null,
+  extras: string[] = []
+): string[] {
+  const defaults = DEFAULT_RPCS[chainId] ?? [];
+  const urls = [...splitRpcUrls(preferred), ...envRpcUrlsFor(chainId), ...extras, ...defaults];
+  return [...new Set(urls.filter(isUsableHttpRpc))];
+}
+
+export function createChainTransport(chainId: number, preferred?: string | readonly string[] | null): Transport {
+  const urls = orderedRpcUrls(mergeRpcUrls(chainId, preferred));
+  return fallback(
+    urls.map((url) =>
+      http(url, {
+        timeout: 6_000,
+        retryCount: 0,
+        fetchOptions: { signal: undefined }
+      })
+    ),
+    { retryCount: 1, rank: true }
+  );
 }
 
 export function mergeRhRpcUrls(preferred?: string | readonly string[] | null, extras: string[] = chainlist): string[] {

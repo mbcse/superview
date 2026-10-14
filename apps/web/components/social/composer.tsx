@@ -78,7 +78,7 @@ export function ComposerEntry({ initials = "You", href = "/app/compose" }: { ini
         href="/app/compose?lens=sky"
         className="flex min-h-11 items-center justify-between border-t border-teal/10 px-4 text-[13px] text-muted hover:bg-white/45 hover:text-ink"
       >
-        Chart the sky
+        Astrology
         <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-teal">Vedic · Western</span>
       </Link>
     </div>
@@ -109,7 +109,7 @@ export function SkyComposer({
   const ready = chart.trim().length >= 8;
   return (
     <form onSubmit={submit} className="post p-5 md:p-6">
-      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-teal">Sky</p>
+      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-teal">Chart</p>
       <label className="sr-only" htmlFor="sky-chart">
         Planetary movements
       </label>
@@ -137,14 +137,14 @@ export function SkyComposer({
         className="mt-1.5 w-full bg-transparent text-[15px] text-ink outline-none placeholder:text-muted/60"
         value={headline}
         onChange={(e) => onHeadline(e.target.value.slice(0, MAX))}
-        placeholder="If empty, the agent writes the view from the sky."
+        placeholder="If empty, the agent writes the view from the chart."
         maxLength={MAX}
         disabled={busy}
       />
       <div className="mt-4 flex items-center justify-between gap-4 border-t border-teal/10 pt-5">
         <CounterRing count={chart.length} max={SKY_MAX} warnAt={3600} />
         <Button type="submit" variant="primary" size="lg" disabled={busy || !ready}>
-          {busy ? "Researching…" : "Read this sky"} <ArrowRight size={16} />
+          {busy ? "Researching…" : "Read this chart"} <ArrowRight size={16} />
         </Button>
       </div>
     </form>

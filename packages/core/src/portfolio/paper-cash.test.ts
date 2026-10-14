@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { applyFill, assertDoubleEntry } from "./ledger.js";
-import { paperFillDeltas, parsePaperUsd, prepareSellFill } from "./paper-book.js";
+import { paperCashId, paperFillDeltas, parsePaperUsd, prepareSellFill } from "./paper-book.js";
+
+describe("paperCashId", () => {
+  it("is one USD ledger for every desk", () => {
+    expect(paperCashId()).toBe("USD");
+    expect(paperCashId({ world: "STOCKS", chainId: 8453 })).toBe("USD");
+    expect(paperCashId({ world: "STOCKS", chainId: 143 })).toBe("USD");
+    expect(paperCashId({ world: "MEMES", chainId: 101 })).toBe("USD");
+  });
+});
 
 describe("parsePaperUsd", () => {
   it("accepts a rounded paper amount", () => {
