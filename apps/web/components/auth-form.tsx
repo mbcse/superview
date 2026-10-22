@@ -86,7 +86,7 @@ export default function AuthForm({ mode }: { mode: "login" | "signup" }) {
             ) : (
               <div className="flex flex-col gap-3">
                 <Button variant="primary" size="lg" className="h-12 w-full" onClick={() => void loginMera()} disabled={!ready}>
-                  Continue with Face ID
+                  Continue with passkey
                 </Button>
                 <Button variant="secondary" size="lg" className="h-12 w-full" onClick={() => void go()} disabled={!ready}>
                   {mode === "login" ? "Sign in" : "Create account"}

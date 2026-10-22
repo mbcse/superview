@@ -21,7 +21,8 @@ function storedChain(world: World): number | null {
   try {
     const raw = JSON.parse(localStorage.getItem(CHAIN_KEY) ?? "{}") as Record<string, number>;
     const n = Number(raw[world]);
-    return n === 101 || n === 4663 ? n : null;
+    if (world === "MEMES") return n === 101 ? n : null;
+    return n === 143 ? n : null;
   } catch {
     return null;
   }
@@ -38,11 +39,12 @@ function saveChain(world: World, chainId: number) {
 }
 
 function defaultChain(world: World) {
-  return world === "MEMES" ? 101 : 4663;
+  return world === "MEMES" ? 101 : 143;
 }
 
-function asChain(id: number, world: World) {
-  return id === 101 || id === 4663 ? id : defaultChain(world);
+function asChain(_id: number, world: World) {
+  if (world === "MEMES") return 101;
+  return 143;
 }
 
 export function useWorld() {
@@ -80,7 +82,7 @@ export function useWorld() {
 }
 
 export const DESKS: Array<{ id: string; world: World; chainId: number; title: string }> = [
-  { id: "stocks", world: "STOCKS", chainId: 101, title: "Stocks" },
+  { id: "stocks", world: "STOCKS", chainId: 143, title: "Stocks" },
   { id: "memes", world: "MEMES", chainId: 101, title: "Memes" }
 ];
 

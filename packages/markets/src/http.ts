@@ -3,20 +3,23 @@ import { breakerFail, breakerOk, breakerSuccess } from "./breaker.js";
 import { LIMITS, waitToken } from "./limiter.js";
 
 type LimitKey = keyof typeof LIMITS;
+type ProviderFetchInit = RequestInit & { waitTimeoutMs?: number };
 
 export async function providerFetch(
   provider: LimitKey,
   url: string,
-  init: RequestInit = {}
+  init: ProviderFetchInit = {}
 ): Promise<Response | null> {
+  const { waitTimeoutMs, ...rest } = init;
   if (!breakerOk(provider)) return null;
   const lim = LIMITS[provider];
-  const ok = await waitToken(provider, lim.rps, lim.burst);
+  const timeout = waitTimeoutMs ?? (provider === "xstocks" ? 45_000 : 8_000);
+  const ok = await waitToken(provider, lim.rps, lim.burst, timeout);
   if (!ok) return null;
   try {
     const res = await fetch(url, {
-      ...init,
-      headers: { accept: "application/json", ...(init.headers ?? {}) }
+      ...rest,
+      headers: { accept: "application/json", ...(rest.headers ?? {}) }
     });
     if (res.status === 429 || res.status >= 500) {
       if (res.status === 429) pushAlert("http_429", `${provider} ${url}`);

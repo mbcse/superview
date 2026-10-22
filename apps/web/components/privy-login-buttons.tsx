@@ -24,11 +24,11 @@ export function PrivyLoginButtons({ disabled }: { disabled?: boolean }) {
             setMeraBusy(true);
             setMeraErr(null);
             void loginMera()
-              .catch((e) => setMeraErr(e instanceof Error ? e.message : "Face ID failed"))
+              .catch((e) => setMeraErr(e instanceof Error ? e.message : "Passkey failed"))
               .finally(() => setMeraBusy(false));
           }}
         >
-          {meraBusy ? "Checking Face ID…" : "Continue with Face ID"}
+          {meraBusy ? "Checking passkey…" : "Continue with passkey"}
         </Button>
       ) : null}
       {meraErr ? <p className="text-xs text-muted">{meraErr}</p> : null}

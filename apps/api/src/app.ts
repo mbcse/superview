@@ -2,7 +2,18 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
 import { loadEnv } from "@takeandstake/config";
-import { parseWorld, parseChainId, cashTokenId, DESKS, isMintOrContract, PAPER_USD_TOKEN_ID, sourceRestricted } from "@takeandstake/shared";
+import {
+  catalogHitRank,
+  catalogSearch,
+  parseWorld,
+  parseChainId,
+  cashTokenId,
+  DESKS,
+  isMintOrContract,
+  LIVE_STOCK_CHAIN_IDS,
+  PAPER_USD_TOKEN_ID,
+  sourceRestricted
+} from "@takeandstake/shared";
 import { syncBagsCatalog, syncCoinbaseBaseCatalog, syncJupiterMemeCatalog, syncXStocksCatalog } from "@takeandstake/markets";
 import { prisma } from "@takeandstake/db";
 import { depositPaperUsd, executePaperRebalance, runDryRunInvest, withdrawPaperUsd } from "./services/paper-invest.js";
@@ -112,7 +123,7 @@ app.get("/v1/worlds", async (_req, res) => {
   const flags = await prisma.featureFlag.findMany();
   const on = (k: string) => Boolean(flags.find((f) => f.key === k)?.enabled);
   res.json({
-    desks: DESKS.map((d) => ({
+    desks: DESKS.filter((d) => !d.hidden).map((d) => ({
       ...d,
       live:
         d.live &&
@@ -122,7 +133,11 @@ app.get("/v1/worlds", async (_req, res) => {
             : on("live_trading_memes")
           : d.chainId === 101
             ? on("live_trading_xstocks")
-            : on("live_trading"))
+            : d.chainId === 8453
+              ? on("live_trading_base")
+              : d.chainId === 143
+                ? on("live_trading_monad")
+                : on("live_trading"))
     }))
   });
 });
@@ -164,12 +179,19 @@ app.get("/v1/assets/by-address/:chainId/:address", async (req, res) => {
 
 app.get("/v1/catalog", async (req, res) => {
   const world = parseWorld(req.query.world);
-  const chainId = req.query.chainId != null ? parseChainId(req.query.chainId, world) : undefined;
+  const parsed = catalogSearch(String(req.query.q ?? ""));
+  const chainId =
+    world === "STOCKS"
+      ? LIVE_STOCK_CHAIN_IDS[0]
+      : req.query.chainId != null
+        ? parseChainId(req.query.chainId, world)
+        : parsed.chainId;
   const source = req.query.source ? String(req.query.source).toUpperCase() : undefined;
   const venue = req.query.venue ? String(req.query.venue).toUpperCase() : undefined;
-  const q = String(req.query.q ?? "").trim();
+  const q = parsed.text ?? "";
   const minLiquidity = Number(req.query.minLiquidity ?? 0);
   const cursor = req.query.cursor ? String(req.query.cursor) : undefined;
+  const take = chainId && !q ? 800 : 400;
   const tokens = await prisma.stockToken.findMany({
     where: {
       world,
@@ -182,7 +204,9 @@ app.get("/v1/catalog", async (req, res) => {
             OR: [
               { symbol: { contains: q, mode: "insensitive" } },
               { name: { contains: q, mode: "insensitive" } },
-              { contractAddress: { contains: q } }
+              { contractAddress: { contains: q } },
+              { underlyingTicker: { contains: q, mode: "insensitive" } },
+              { xstocksSymbol: { contains: q, mode: "insensitive" } }
             ]
           }
         : {}),
@@ -190,10 +214,12 @@ app.get("/v1/catalog", async (req, res) => {
     },
     include: { universe: true },
     orderBy: { id: "asc" },
-    take: 200,
+    take,
     ...(cursor ? { skip: 1, cursor: { id: cursor } } : {})
   });
-  const visible = tokens.filter((t) => !(t.riskFlags as { isSus?: boolean } | null)?.isSus);
+  const visible = tokens
+    .filter((t) => !(t.riskFlags as { isSus?: boolean } | null)?.isSus)
+    .sort((a, b) => catalogHitRank(a, q) - catalogHitRank(b, q) || a.symbol.localeCompare(b.symbol));
   const rows = visible.map((t) => ({
     id: t.id,
     symbol: t.symbol,

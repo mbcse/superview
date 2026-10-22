@@ -14,7 +14,7 @@ import type { PriceSource } from "./types.js";
 import { bagsLaunchFeed } from "./bags.js";
 import { jupiterSearch, riskFromJupiter } from "./jupiter.js";
 import { pumpDiscover, pumpVenue } from "./pump.js";
-import { listXStocks, xstockChainId, type XStockNetwork } from "./xstocks.js";
+import { listXStocks, shouldRetireUnseenXStocks, xstockChainId, type XStockNetwork } from "./xstocks.js";
 import { coinbaseMultiplierWad, listCoinbaseBaseStocks, quoteByAddress } from "./coinbase-base.js";
 import { dexScreenerQuotes } from "./dexscreener.js";
 
@@ -48,7 +48,7 @@ export async function writePriceSnapshot(input: {
 }
 
 export async function syncXStocksCatalog(network: XStockNetwork = "Solana") {
-  const rows = await listXStocks(network);
+  const { assets: rows, complete } = await listXStocks(network);
   const chainId = xstockChainId(network);
   const venue = chainId === MONAD_CHAIN_ID ? "KURU_FLOW" : "AMM";
   let count = 0;
@@ -98,7 +98,7 @@ export async function syncXStocksCatalog(network: XStockNetwork = "Solana") {
     seen.push(mint);
     await copyUniverseFromSibling(chainId, mint, ticker, row.name, row.isin);
   }
-  if (seen.length) {
+  if (shouldRetireUnseenXStocks(complete, seen.length)) {
     await prisma.stockToken.updateMany({
       where: {
         chainId,
@@ -109,7 +109,7 @@ export async function syncXStocksCatalog(network: XStockNetwork = "Solana") {
       data: { status: "INACTIVE" }
     });
   }
-  return { count, chainId };
+  return { count, chainId, complete };
 }
 
 export async function copyUniverseFromSibling(

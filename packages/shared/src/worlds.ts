@@ -42,7 +42,8 @@ export const DESKS: Array<
     cash: "USDG",
     cashDecimals: 6,
     benchmark: "SPY",
-    live: true
+    live: false,
+    hidden: true
   },
   {
     id: "stocks-sol",
@@ -52,7 +53,8 @@ export const DESKS: Array<
     cash: "USDC",
     cashDecimals: 6,
     benchmark: "SPY",
-    live: true
+    live: false,
+    hidden: true
   },
   {
     id: "stocks-base",
@@ -62,7 +64,8 @@ export const DESKS: Array<
     cash: "USDC",
     cashDecimals: 6,
     benchmark: "SPY",
-    live: true
+    live: false,
+    hidden: true
   },
   {
     id: "stocks-monad",
@@ -105,19 +108,32 @@ export function parseWorld(raw: unknown, fallback: World = "STOCKS"): World {
 export function parseChainId(raw: unknown, world: World = "STOCKS"): number {
   const n = Number(raw);
   if (Number.isFinite(n) && isKnownChainId(n)) return n;
-  return world === "MEMES" ? SOLANA_CHAIN_ID : ROBINHOOD_CHAIN_ID;
+  return world === "MEMES" ? SOLANA_CHAIN_ID : MONAD_CHAIN_ID;
 }
 
 export function parseAllowedChains(raw: unknown, world: World = "STOCKS"): number[] {
   if (Array.isArray(raw)) {
     const ids = raw.map((v) => Number(v)).filter((n) => Number.isFinite(n) && isKnownChainId(n));
-    if (ids.length) return [...new Set(ids)];
+    if (ids.length) return clampStockChains(ids, world);
   }
-  if (raw != null && raw !== "") return [parseChainId(raw, world)];
-  return world === "MEMES" ? [SOLANA_CHAIN_ID] : [...CHAIN_IDS_STOCKS];
+  if (raw != null && raw !== "") return clampStockChains([parseChainId(raw, world)], world);
+  return world === "MEMES" ? [SOLANA_CHAIN_ID] : [...LIVE_STOCK_CHAIN_IDS];
 }
 
-const CHAIN_IDS_STOCKS = [SOLANA_CHAIN_ID, ROBINHOOD_CHAIN_ID, BASE_CHAIN_ID, MONAD_CHAIN_ID];
+/** All stock desks. Keep in sync when a chain comes back. */
+export const STOCK_CHAIN_IDS = [SOLANA_CHAIN_ID, ROBINHOOD_CHAIN_ID, BASE_CHAIN_ID, MONAD_CHAIN_ID];
+/** Temporary: stocks research, catalog, and routing stay on Monad only. */
+export const LIVE_STOCK_CHAIN_IDS = [MONAD_CHAIN_ID];
+
+export function isLiveStockChain(chainId: number) {
+  return LIVE_STOCK_CHAIN_IDS.includes(chainId);
+}
+
+function clampStockChains(ids: number[], world: World) {
+  if (world !== "STOCKS") return [...new Set(ids)];
+  const live = ids.filter((id) => isLiveStockChain(id));
+  return live.length ? [...new Set(live)] : [...LIVE_STOCK_CHAIN_IDS];
+}
 
 export function deskOf(world: World, chainId: number) {
   const desk = DESKS.find((d) => d.world === world && d.chainId === chainId);

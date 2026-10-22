@@ -6,3 +6,4 @@ export * from "./chains.js";
 export * from "./worlds.js";
 export * from "./identity.js";
 export * from "./jurisdiction.js";
+export * from "./catalog.js";

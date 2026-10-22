@@ -68,6 +68,11 @@ function readCredential(): MeraCredential | undefined {
   }
 }
 
+export function meraCredential() {
+  if (typeof window === "undefined") return undefined;
+  return readCredential();
+}
+
 function writeCredential(cred: MeraCredential) {
   localStorage.setItem(MERA_CREDENTIAL, JSON.stringify(cred));
 }

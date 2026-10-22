@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanAbout, isJunkAbout } from "./token-card.js";
+import { cleanAbout, isJunkAbout, listingChainOrder, pickTokenCardRow, tokenLookupSymbols } from "./token-card.js";
 
 describe("cleanAbout", () => {
   it("keeps a real company brief", () => {
@@ -16,6 +16,21 @@ describe("cleanAbout", () => {
       )
     ).toBeNull();
     expect(isJunkAbout('{"run_id":"trun_abc","interaction_id":"x"} more text here for length')).toBe(true);
+  });
+
+  it("looks up NVDA and NVDAx as the same company", () => {
+    expect(tokenLookupSymbols("NVDA")).toEqual(expect.arrayContaining(["NVDA", "NVDAx", "NVDAc"]));
+    expect(tokenLookupSymbols("NVDAx")).toEqual(expect.arrayContaining(["NVDA", "NVDAx"]));
+    expect(listingChainOrder(143)).toBeGreaterThan(listingChainOrder(101));
+    expect(
+      pickTokenCardRow(
+        [
+          { symbol: "NVDA", status: "ACTIVE", chainId: 4663, universe: { legalName: "NVIDIA" } },
+          { symbol: "NVDAx", status: "ACTIVE", chainId: 143, universe: null }
+        ],
+        "NVDA"
+      )?.symbol
+    ).toBe("NVDAx");
   });
 
   it("drops the SNAP food-stamp news dump", () => {

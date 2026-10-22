@@ -10,7 +10,7 @@ export function stockTick(symbol: string, chainId?: number, logoUrl?: string | n
   const chain = resolveChainId(symbol, chainId, logoUrl);
   let t = tick(symbol);
   if (chain === 4663 && t.startsWith("RH") && t.length > 2) t = t.slice(2);
-  if (chain === 101 && t.length >= 3 && t.endsWith("X")) t = t.slice(0, -1);
+  if ((chain === 101 || chain === 143) && t.length >= 3 && t.endsWith("X")) t = t.slice(0, -1);
   if (chain === 8453 && t.length >= 3 && t.endsWith("C")) t = t.slice(0, -1);
   if (!chain && t.startsWith("RH") && t.length > 2 && t.length <= 8) t = t.slice(2);
   return t;

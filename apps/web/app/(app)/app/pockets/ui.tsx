@@ -401,7 +401,7 @@ function PocketCard({
                 Withdraw cash
               </Button>
             ) : null}
-            {mera ? <p className="text-[13px] text-muted">Face ID signs every live trade. Autopilot stays off.</p> : null}
+            {mera ? <p className="text-[13px] text-muted">Your passkey signs every live trade. Autopilot stays off.</p> : null}
           </>
         ) : (
           <Button

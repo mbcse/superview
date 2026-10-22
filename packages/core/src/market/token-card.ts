@@ -1,5 +1,5 @@
 import { prisma } from "@takeandstake/db";
-import { displaySymbol, robinhoodAliases } from "@takeandstake/shared";
+import { companyTicker, displaySymbol, isLiveStockChain, robinhoodAliases, STOCK_CHAIN_IDS } from "@takeandstake/shared";
 
 export type TokenCard = {
   symbol: string;
@@ -39,26 +39,68 @@ export function cleanAbout(raw: unknown): string | null {
   return text.slice(0, 800);
 }
 
-function symbolsFor(raw: string) {
-  return robinhoodAliases(raw.trim());
+export function tokenLookupSymbols(raw: string): string[] {
+  const t = raw.trim();
+  if (!t) return [];
+  const bare = t.replace(/[xc]$/i, "");
+  return [...new Set([...robinhoodAliases(t), t, bare, `${bare}x`, `${bare}c`])].filter(Boolean);
+}
+
+export function listingChainOrder(chainId: number): number {
+  const order = [4663, 101, 8453, 143];
+  const i = order.indexOf(chainId);
+  return i === -1 ? 99 : i;
+}
+
+export function pickTokenCardRow<T extends { symbol: string; status?: string | null; universe?: unknown; chainId?: number }>(
+  tokens: T[],
+  raw: string
+): T | undefined {
+  const want = raw.trim().toUpperCase();
+  const active = tokens.filter((t) => t.status !== "INACTIVE" && t.status !== "HALTED");
+  const pool = active.length ? active : tokens;
+  const live = pool.filter((t) => t.chainId != null && isLiveStockChain(t.chainId));
+  const prefer = live.length ? live : pool;
+  return (
+    prefer.find((t) => t.symbol.toUpperCase() === want) ??
+    prefer.find((t) => t.universe) ??
+    prefer[0] ??
+    pool.find((t) => t.symbol.toUpperCase() === want) ??
+    pool.find((t) => t.universe) ??
+    pool[0]
+  );
 }
 
 export async function loadTokenCard(symbol: string): Promise<{ card: TokenCard; tokenId: string } | null> {
   const raw = symbol.trim();
-  const symbols = [...new Set([...symbolsFor(raw), raw, raw.replace(/x$/i, ""), `${raw.replace(/x$/i, "")}x`])].filter(Boolean);
+  const symbols = tokenLookupSymbols(raw);
+  const tickers = [...new Set(symbols.map((s) => companyTicker(s)).filter(Boolean))];
   if (!symbols.length) return null;
   const tokens = await prisma.stockToken.findMany({
-    where: { OR: symbols.map((s) => ({ symbol: { equals: s, mode: "insensitive" } })) },
+    where: {
+      OR: [
+        ...symbols.map((s) => ({ symbol: { equals: s, mode: "insensitive" as const } })),
+        ...tickers.map((s) => ({ underlyingTicker: { equals: s, mode: "insensitive" as const } }))
+      ]
+    },
     include: { universe: true }
   });
-  const token = tokens.find((t) => t.universe) ?? tokens[0];
+  const token = pickTokenCardRow(tokens, raw);
   if (!token) return null;
-  const siblings = token.isin
+  const siblingWhere = [
+    ...(token.isin ? [{ isin: token.isin }] : []),
+    ...(token.underlyingTicker ? [{ underlyingTicker: token.underlyingTicker }] : [])
+  ];
+  const siblings = siblingWhere.length
     ? await prisma.stockToken.findMany({
-        where: { isin: token.isin, status: "ACTIVE" },
+        where: { status: "ACTIVE", OR: siblingWhere },
         select: { id: true, symbol: true, chainId: true, source: true, contractAddress: true }
       })
     : tokens.map((t) => ({ id: t.id, symbol: t.symbol, chainId: t.chainId, source: t.source, contractAddress: t.contractAddress }));
+  const visible = siblings.filter(
+    (t) => !STOCK_CHAIN_IDS.includes(t.chainId) || isLiveStockChain(t.chainId)
+  );
+  visible.sort((a, b) => listingChainOrder(a.chainId) - listingChainOrder(b.chainId) || a.symbol.localeCompare(b.symbol));
   const u = token.universe;
   const about = cleanAbout(u?.businessSummary) ?? cleanAbout(u?.profile);
   const name = (u?.legalName || token.name || displaySymbol(token)).trim();
@@ -72,7 +114,7 @@ export async function loadTokenCard(symbol: string): Promise<{ card: TokenCard; 
       industry: u?.industry ?? null,
       logoUrl: token.logoUrl ?? null,
       about,
-      listings: siblings.map((t) => ({
+      listings: visible.map((t) => ({
         id: t.id,
         symbol: displaySymbol(t),
         chainId: t.chainId,

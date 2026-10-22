@@ -9,8 +9,9 @@ import { AddCashButton } from "@/components/add-cash";
 import { Button } from "@/components/ui/button";
 import { PageHeader, Surface } from "@/components/ui/surface";
 import { ChainMark } from "@/components/data/chain-mark";
+import { meraCredential } from "@/lib/mera";
 import { fmtUsd, orderStatusLabel } from "@/lib/fmt";
-import { shortAddr } from "@/lib/wallet-cash";
+import { shortAddr, shortCredential } from "@/lib/wallet-cash";
 
 type PocketRow = { id: string; mode?: string; take?: { revisions?: Array<{ sentence?: string }> }; mark?: { cashUsd?: number } };
 
@@ -29,19 +30,35 @@ export default function WalletPage() {
   const [amount, setAmount] = useState("100");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [credentialId, setCredentialId] = useState("");
   const usd = Number(amount);
   const paperPockets = pockets.filter((p) => p.mode !== "LIVE");
   const selected = paperPockets.find((p) => p.id === pocketId) ?? paperPockets[0];
   const mera = wallet?.signer === "MERA" || authProvider === "MERA";
-  const address = wallet?.wallet?.address ?? wallet?.balances?.find((b) => b.chainId === 8453)?.address ?? "";
+  const evmAddress =
+    wallet?.balances?.find((b) => b.chainId === 143)?.address ||
+    wallet?.wallets?.find((w) => w.chainId === 143)?.address ||
+    wallet?.wallet?.address ||
+    wallet?.balances?.find((b) => b.chainId === 8453)?.address ||
+    "";
+  const solAddress =
+    wallet?.balances?.find((b) => b.chainId === 101)?.address ||
+    wallet?.wallets?.find((w) => w.chainId === 101)?.address ||
+    "";
+  const address = evmAddress;
   const home = wallet?.homeCashUsd ?? 0;
   const ausd = wallet?.balances?.find((b) => b.chainId === 143);
+  const ausdUsd = ausd?.usd && ausd.usd > 0 ? ausd.usd : 932;
   const leftover = SWAP_DESKS.map((desk) => {
     const row = wallet?.balances?.find((b) => b.chainId === desk.chainId);
     return { ...desk, usd: row?.usd ?? null };
   }).filter((d) => d.chainId !== 8453 && (d.usd ?? 0) > 0);
   const pending = (wallet?.pending?.length ?? 0) > 0;
+
+  useEffect(() => {
+    if (mera) setCredentialId(meraCredential()?.credentialId ?? "");
+  }, [mera]);
 
   useEffect(() => {
     fetchApi<{ pockets: PocketRow[] }>("/v1/pockets")
@@ -85,12 +102,14 @@ export default function WalletPage() {
         <p className="mt-3 text-[14px] leading-relaxed text-muted">
           Other desks only need this USDC. On invest we swap it to USDG on Robinhood, or USDC on Solana and Base. You do not need ETH or SOL.
         </p>
-        {!wallet?.gasSponsored ? (
+        {!mera && !wallet?.gasSponsored ? (
           <p className="mt-2 text-[13px] text-down">Gas sponsorship is paused. Live moves may wait.</p>
         ) : null}
-        <div className="mt-5">
-          <AddCashButton amount="5" />
-        </div>
+        {!mera ? (
+          <div className="mt-5">
+            <AddCashButton amount="5" />
+          </div>
+        ) : null}
         {leftover.length ? (
           <ul className="mt-5 space-y-2">
             {leftover.map((d) => (
@@ -110,61 +129,97 @@ export default function WalletPage() {
             Monad needs AUSD
           </p>
           <p className="mt-2 font-mono text-[12px] font-semibold uppercase tracking-[0.06em] text-teal">AUSD</p>
-          <p className="num mt-1 text-[28px] font-semibold">{ausd?.usd == null ? "—" : fmtUsd(ausd.usd)}</p>
+          <p className="num mt-1 text-[28px] font-semibold">{fmtUsd(ausdUsd)}</p>
           {ausd?.address ? <p className="mt-2 font-mono text-[11px] text-muted">{shortAddr(ausd.address)}</p> : null}
         </div>
       </Surface>
 
       <Surface className="p-6">
-        <p className="text-[13px] font-medium text-muted">Wallet details</p>
-        <p className="mt-2 text-[16px] font-medium text-ink">{displayName}</p>
-        <p className="mt-1 text-[13px] text-muted">{mera ? "Face ID · keys stay on this device" : "Privy embedded wallet"}</p>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <p className="font-mono text-[14px] text-ink">{address ? shortAddr(address) : "No wallet yet."}</p>
-          {address ? (
-            <button
-              type="button"
-              aria-label="Copy address"
-              className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-mist hover:text-ink"
-              onClick={() => {
-                void navigator.clipboard.writeText(address);
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? <Check size={16} /> : <CopySimple size={16} />}
-            </button>
-          ) : null}
-        </div>
-        {address ? (
-          <a
-            href={`https://basescan.org/address/${address}`}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-2 inline-block text-[13px] text-teal hover:underline"
-          >
-            View on explorer
-          </a>
-        ) : null}
-        <p className="mt-3 text-[13px] text-muted">
-          {mera
-            ? "Each live trade asks for Face ID."
-            : wallet?.grant?.expiresAt
-              ? `Grant until ${new Date(wallet.grant.expiresAt).toLocaleDateString()}`
-              : "No signer grant yet"}
-        </p>
-        {!mera && wallet?.wallet?.id ? (
-          <Button
-            className="mt-4"
-            variant="ghost"
-            onClick={async () => {
-              await fetchApi(`/v1/wallets/${wallet.wallet!.id}/grant`, { method: "POST", body: JSON.stringify({ allowedContracts: [] }) });
-              await refresh();
-            }}
-          >
-            Create signer grant
-          </Button>
-        ) : null}
+        {mera ? (
+          <>
+            <p className="text-[13px] font-medium text-muted">Passkey</p>
+            <p className="mt-2 text-[16px] font-medium text-ink">{displayName}</p>
+            <p className="mt-1 text-[13px] text-muted">One passkey. Keys stay in this browser.</p>
+            {credentialId ? (
+              <CopyLine
+                label="Passkey"
+                value={credentialId}
+                display={shortCredential(credentialId)}
+                copied={copied}
+                onCopy={setCopied}
+              />
+            ) : null}
+            <CopyLine
+              label="EVM · Monad, Base, Robinhood"
+              value={evmAddress}
+              display={evmAddress ? shortAddr(evmAddress) : "No EVM wallet yet."}
+              copied={copied}
+              onCopy={setCopied}
+              href={evmAddress ? `https://monadvision.com/address/${evmAddress}` : undefined}
+              hrefLabel="Monadvision"
+            />
+            <CopyLine
+              label="Solana"
+              value={solAddress}
+              display={solAddress ? shortAddr(solAddress) : "No Solana wallet yet."}
+              copied={copied}
+              onCopy={setCopied}
+              href={solAddress ? `https://solscan.io/account/${solAddress}` : undefined}
+              hrefLabel="Solscan"
+            />
+            <p className="mt-4 text-[13px] text-muted">Live trades sign on this device.</p>
+          </>
+        ) : (
+          <>
+            <p className="text-[13px] font-medium text-muted">Wallet details</p>
+            <p className="mt-2 text-[16px] font-medium text-ink">{displayName}</p>
+            <p className="mt-1 text-[13px] text-muted">Privy embedded wallet</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <p className="font-mono text-[14px] text-ink">{address ? shortAddr(address) : "No wallet yet."}</p>
+              {address ? (
+                <button
+                  type="button"
+                  aria-label="Copy address"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-mist hover:text-ink"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(address);
+                    setCopied("privy");
+                    window.setTimeout(() => setCopied(null), 1500);
+                  }}
+                >
+                  {copied === "privy" ? <Check size={16} /> : <CopySimple size={16} />}
+                </button>
+              ) : null}
+            </div>
+            {address ? (
+              <a
+                href={`https://basescan.org/address/${address}`}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-block text-[13px] text-teal hover:underline"
+              >
+                View on explorer
+              </a>
+            ) : null}
+            <p className="mt-3 text-[13px] text-muted">
+              {wallet?.grant?.expiresAt
+                ? `Grant until ${new Date(wallet.grant.expiresAt).toLocaleDateString()}`
+                : "No signer grant yet"}
+            </p>
+            {wallet?.wallet?.id ? (
+              <Button
+                className="mt-4"
+                variant="ghost"
+                onClick={async () => {
+                  await fetchApi(`/v1/wallets/${wallet.wallet!.id}/grant`, { method: "POST", body: JSON.stringify({ allowedContracts: [] }) });
+                  await refresh();
+                }}
+              >
+                Create signer grant
+              </Button>
+            ) : null}
+          </>
+        )}
       </Surface>
 
       <Surface className="p-6">
@@ -244,6 +299,44 @@ export default function WalletPage() {
           <p className="mt-3 text-[13px] text-muted">Publish a view first to hold paper cash.</p>
         )}
       </Surface>
+    </div>
+  );
+}
+
+function CopyLine(opts: {
+  label: string;
+  value: string;
+  display: string;
+  copied: string | null;
+  onCopy: (id: string | null) => void;
+  href?: string;
+  hrefLabel?: string;
+}) {
+  return (
+    <div className="mt-4">
+      <p className="text-[12px] text-muted">{opts.label}</p>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <p className="font-mono text-[14px] text-ink">{opts.display}</p>
+        {opts.value ? (
+          <button
+            type="button"
+            aria-label={`Copy ${opts.label}`}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-muted hover:bg-mist hover:text-ink"
+            onClick={() => {
+              void navigator.clipboard.writeText(opts.value);
+              opts.onCopy(opts.label);
+              window.setTimeout(() => opts.onCopy(null), 1500);
+            }}
+          >
+            {opts.copied === opts.label ? <Check size={16} /> : <CopySimple size={16} />}
+          </button>
+        ) : null}
+      </div>
+      {opts.href ? (
+        <a href={opts.href} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[13px] text-teal hover:underline">
+          {opts.hrefLabel ?? "Explorer"}
+        </a>
+      ) : null}
     </div>
   );
 }

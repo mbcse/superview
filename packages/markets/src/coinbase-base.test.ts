@@ -137,6 +137,7 @@ describe("xStocks listing bind", () => {
     expect(parseXStockNode(node, "Monad")?.mint).toBe("0xc845b2894dbddd03858fd2d643b4ef725fe0849d");
     expect(parseXStockNode(node, "Solana")?.mint).toBe("XsoCS1TfEyfFhfvj8EtZ538L3NKLFUwPPEbCnTvwre4");
     expect(parseXStockNode(node, "Monad")?.symbol).toBe("NVDAx");
+    expect(parseXStockNode(node, "Monad")?.name).toBe("NVIDIA");
   });
 
   it("drops a row with no ticker or a mint that is not valid on that chain", () => {

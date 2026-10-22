@@ -59,6 +59,12 @@ export const CORE_XSTOCKS = [
   "SLVx"
 ];
 
+export type XStockList = { assets: XStockAsset[]; complete: boolean };
+
+export function xstockDisplayName(name: string, symbol: string) {
+  return sanitizeCatalogText(name.replace(/\s+xStocks?$/i, "").trim() || symbol, 80);
+}
+
 export function parseXStockNode(row: XStockNode, network: XStockNetwork = "Solana"): XStockAsset | null {
   const chainId = NETWORK_CHAIN[network];
   const want = new RegExp(`^${network}$`, "i");
@@ -68,7 +74,7 @@ export function parseXStockNode(row: XStockNode, network: XStockNetwork = "Solan
   if (!symbol || !mint || !underlyingTicker(symbol, "XSTOCKS")) return null;
   return {
     symbol,
-    name: sanitizeCatalogText(String(row.name ?? symbol), 80),
+    name: xstockDisplayName(String(row.name ?? symbol), symbol),
     isin: row.underlying?.isin ?? row.isin,
     logo: row.logo,
     isTradingHalted: Boolean(row.isTradingHalted),
@@ -77,26 +83,62 @@ export function parseXStockNode(row: XStockNode, network: XStockNetwork = "Solan
   };
 }
 
+export function mergeXStockNodes(
+  nodes: XStockNode[],
+  network: XStockNetwork,
+  into = new Map<string, XStockAsset>()
+) {
+  for (const row of nodes) {
+    const parsed = parseXStockNode(row, network);
+    if (parsed?.mint) into.set(parsed.mint, parsed);
+  }
+  return into;
+}
+
+export function shouldRetireUnseenXStocks(complete: boolean, seen: number) {
+  return complete && seen > 0;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchXStockPage(
+  network: XStockNetwork,
+  page: number
+): Promise<{ nodes: XStockNode[]; hasNextPage: boolean } | null> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await providerFetch(
+      "xstocks",
+      `https://api.xstocks.fi/api/v2/public/assets?network=${encodeURIComponent(network)}&pageSize=100&page=${page}`,
+      { waitTimeoutMs: 45_000 }
+    );
+    if (res?.ok) {
+      const body = (await res.json()) as { nodes?: XStockNode[]; page?: { hasNextPage?: boolean } };
+      return { nodes: body.nodes ?? [], hasNextPage: Boolean(body.page?.hasNextPage) };
+    }
+    await sleep(1_500 * (attempt + 1));
+  }
+  return null;
+}
+
 async function fetchXStock(symbol: string, network: XStockNetwork = "Solana"): Promise<XStockAsset | null> {
   const res = await providerFetch("xstocks", `https://api.xstocks.fi/api/v2/public/assets/${encodeURIComponent(symbol)}`);
   if (!res?.ok) return null;
   return parseXStockNode((await res.json()) as XStockNode, network);
 }
 
-export async function listXStocks(network: XStockNetwork = "Solana"): Promise<XStockAsset[]> {
+export async function listXStocks(network: XStockNetwork = "Solana"): Promise<XStockList> {
   const byMint = new Map<string, XStockAsset>();
+  let complete = false;
   for (let page = 0; page < 20; page++) {
-    const res = await providerFetch(
-      "xstocks",
-      `https://api.xstocks.fi/api/v2/public/assets?network=${encodeURIComponent(network)}&pageSize=100&page=${page}`
-    );
-    if (!res?.ok) break;
-    const body = (await res.json()) as { nodes?: XStockNode[]; page?: { hasNextPage?: boolean } };
-    for (const row of body.nodes ?? []) {
-      const parsed = parseXStockNode(row, network);
-      if (parsed?.mint) byMint.set(parsed.mint, parsed);
+    const body = await fetchXStockPage(network, page);
+    if (!body) break;
+    mergeXStockNodes(body.nodes, network, byMint);
+    if (!body.hasNextPage) {
+      complete = true;
+      break;
     }
-    if (!body.page?.hasNextPage) break;
   }
   const have = new Set([...byMint.values()].map((a) => a.symbol.toUpperCase()));
   for (const symbol of CORE_XSTOCKS) {
@@ -107,7 +149,7 @@ export async function listXStocks(network: XStockNetwork = "Solana"): Promise<XS
       have.add(extra.symbol.toUpperCase());
     }
   }
-  return [...byMint.values()];
+  return { assets: [...byMint.values()], complete };
 }
 
 export function xstockChainId(network: XStockNetwork = "Solana") {

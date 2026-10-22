@@ -16,6 +16,7 @@ import {
   privyCashAsset,
   privyChainAlias
 } from "./chains.js";
+import { catalogHitRank, catalogSearch } from "./catalog.js";
 import { cashTokenId, deskOf, parseAllowedChains, parseChainId } from "./worlds.js";
 import { companyTicker, sameIssuerListing, sameTokenAddress, underlyingTicker } from "./identity.js";
 import { SNAPSHOT_PRICE_MAX, SNAPSHOT_VOLUME_MAX, finiteDecimal } from "./money.js";
@@ -52,8 +53,10 @@ describe("chain registry", () => {
     expect(parseChainId(8453)).toBe(BASE_CHAIN_ID);
     expect(parseChainId("143")).toBe(MONAD_CHAIN_ID);
     expect(parseChainId(undefined, "MEMES")).toBe(SOLANA_CHAIN_ID);
-    expect(parseAllowedChains(undefined, "STOCKS")).toContain(MONAD_CHAIN_ID);
-    expect(parseAllowedChains([101], "STOCKS")).toEqual([SOLANA_CHAIN_ID]);
+    expect(parseChainId(undefined, "STOCKS")).toBe(MONAD_CHAIN_ID);
+    expect(parseAllowedChains(undefined, "STOCKS")).toEqual([MONAD_CHAIN_ID]);
+    expect(parseAllowedChains([101, 4663, 8453, 143], "STOCKS")).toEqual([MONAD_CHAIN_ID]);
+    expect(parseAllowedChains([101], "STOCKS")).toEqual([MONAD_CHAIN_ID]);
   });
 
   it("maps executors and live flags", () => {
@@ -102,6 +105,20 @@ describe("chain registry", () => {
       )
     ).toBe(false);
     expect(sameTokenAddress(nvda, nvda.toUpperCase(), BASE_CHAIN_ID)).toBe(true);
+  });
+});
+
+describe("catalog search", () => {
+  it("treats monad stocks as the Monad desk, not a ticker", () => {
+    expect(catalogSearch("monad stocks")).toEqual({ chainId: MONAD_CHAIN_ID });
+    expect(catalogSearch("token monad")).toEqual({ chainId: MONAD_CHAIN_ID });
+    expect(catalogSearch("nvda monad")).toEqual({ chainId: MONAD_CHAIN_ID, text: "nvda" });
+    expect(catalogSearch("TSLA")).toEqual({ text: "TSLA" });
+  });
+
+  it("ranks the company ticker ahead of a loose name match", () => {
+    expect(catalogHitRank({ symbol: "NVDAx", name: "NVIDIA", underlyingTicker: "NVDA" }, "nvda")).toBe(0);
+    expect(catalogHitRank({ symbol: "AEHRx", name: "Aehr Test Systems", underlyingTicker: "AEHR" }, "nvda")).toBe(4);
   });
 });
 

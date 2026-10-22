@@ -36,3 +36,9 @@ export function shortAddr(addr?: string | null) {
   if (addr.length < 12) return addr;
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
+
+export function shortCredential(id?: string | null) {
+  if (!id) return "";
+  if (id.length < 16) return id;
+  return `${id.slice(0, 8)}…${id.slice(-6)}`;
+}
