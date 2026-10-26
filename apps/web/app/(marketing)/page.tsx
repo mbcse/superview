@@ -2,6 +2,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { MarketingChrome } from "@/components/marketing/chrome";
 import { HeroDemo } from "@/components/marketing/hero-demo";
+import { ResearchCreditsNotice } from "@/components/research-credits-notice";
 import { TakeCard, type FeedTake } from "@/components/social/take-card";
 import { LeaderboardRow } from "@/components/social/leaderboard-row";
 import { api } from "@/lib/api";
@@ -33,7 +34,8 @@ export default async function LandingPage() {
       <section className="mx-auto w-[min(1080px,calc(100%-16px))] pt-3">
         <MarketingChrome />
         <div className="mx-auto max-w-[880px] px-2 pb-16 pt-8 md:pt-12">
-          <h1 className="display max-w-[18ch] text-[clamp(36px,5.6vw,56px)]">
+          <ResearchCreditsNotice size="hero" />
+          <h1 className="display mt-10 max-w-[18ch] text-[clamp(36px,5.6vw,56px)]">
             Say what you believe about the world. Watch it play out.
           </h1>
           <p className="mt-4 max-w-[30rem] text-[17px] leading-relaxed text-muted">

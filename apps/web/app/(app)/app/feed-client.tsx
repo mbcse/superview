@@ -14,6 +14,7 @@ import { InvestDialog } from "@/components/social/invest-dialog";
 import { SegmentedTabs } from "@/components/data/segmented-tabs";
 import { cn } from "@/lib/cn";
 import { useWorld } from "@/lib/world";
+import { ResearchCreditsNotice } from "@/components/research-credits-notice";
 
 const TABS = ["For you", "Following", "Trending"] as const;
 const TAB_API: Record<(typeof TABS)[number], string> = {
@@ -106,6 +107,9 @@ export default function FeedClient({ initial }: { initial: FeedTake[] }) {
           value={world === "MEMES" ? "Memes" : "Stocks"}
           onChange={(v) => setWorld(v === "Memes" ? "MEMES" : "STOCKS")}
         />
+      </div>
+      <div className="mb-6">
+        <ResearchCreditsNotice />
       </div>
       <h1 className="text-[20px] font-semibold tracking-[-0.02em] text-ink">
         {firstName ? `${greeting()}, ${firstName}` : greeting()}

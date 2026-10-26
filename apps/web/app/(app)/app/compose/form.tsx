@@ -34,6 +34,7 @@ import { ApiError } from "@/lib/api";
 import { API_ORIGIN } from "@/lib/fmt";
 import { useWorld } from "@/lib/world";
 import { completeLiveInvest } from "@/lib/live-order";
+import { ResearchCreditsNotice } from "@/components/research-credits-notice";
 
 type Holding = { tokenId: string; symbol: string; weightBps: number; rationale?: string; role?: string; chainId?: number; logoUrl?: string | null };
 
@@ -619,6 +620,9 @@ export default function ComposeForm() {
         }
       />
       <main id="main" className="mx-auto w-full max-w-[760px] px-5 pb-20 pt-8 md:pt-16">
+        <div className="mb-8">
+          <ResearchCreditsNotice />
+        </div>
         <h1 className="display text-[28px] text-ink md:text-[40px]">
           {lens === "SKY" ? "Write an astrology chart" : "What’s your view on the world?"}
         </h1>

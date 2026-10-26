@@ -1,6 +1,7 @@
 import { api } from "@/lib/api";
 import Link from "next/link";
 import { MarketingChrome } from "@/components/marketing/chrome";
+import { ResearchCreditsNotice } from "@/components/research-credits-notice";
 import { LeaderboardRow } from "@/components/social/leaderboard-row";
 import type { FeedTake } from "@/components/social/take-card";
 
@@ -23,6 +24,9 @@ export default async function ExplorePage({
     <>
       <MarketingChrome />
       <main className="mx-auto w-[min(720px,calc(100%-24px))] py-16">
+        <div className="mb-10">
+          <ResearchCreditsNotice />
+        </div>
         <h1 className="display text-[32px] text-ink md:text-[40px]">Trending views</h1>
         <p className="mt-3 text-[16px] text-muted">Public views, ranked vs S&P 500.</p>
         <div className="mt-6 flex gap-2 text-[13px]">
