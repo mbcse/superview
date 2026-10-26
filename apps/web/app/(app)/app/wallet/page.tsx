@@ -49,7 +49,7 @@ export default function WalletPage() {
   const address = evmAddress;
   const home = wallet?.homeCashUsd ?? 0;
   const ausd = wallet?.balances?.find((b) => b.chainId === 143);
-  const ausdUsd = ausd?.usd && ausd.usd > 0 ? ausd.usd : 932;
+  const ausdUsd = ausd?.usd && ausd.usd > 0 ? ausd.usd : null;
   const leftover = SWAP_DESKS.map((desk) => {
     const row = wallet?.balances?.find((b) => b.chainId === desk.chainId);
     return { ...desk, usd: row?.usd ?? null };

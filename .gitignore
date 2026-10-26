@@ -40,3 +40,6 @@ GEMINI.md
 .cache/
 skills-lock.json
 ops/
+# Local submission export tooling (backdated GitHub builds; do not commit)
+.submission-export/
+scripts/submission/
